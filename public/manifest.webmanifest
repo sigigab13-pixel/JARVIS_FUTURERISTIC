@@ -1,0 +1,11 @@
+{
+  "name": "Saviour's JARVIS",
+  "short_name": "JARVIS",
+  "description": "Saviour's futuristic personal assistant",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#050b14",
+  "theme_color": "#07111f",
+  "icons": []
+}
