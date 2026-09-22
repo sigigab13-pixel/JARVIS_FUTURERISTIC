@@ -1,0 +1,67 @@
+[
+  {
+    "name": "Chat with the restored JARVIS AI core",
+    "sanity": true,
+    "viewport": "desktop",
+    "covers": ["AI chat core", "/api/chat backend route", "rendered assistant response"],
+    "description": "Verifies the primary JARVIS chat workflow reaches the backend AI core and renders a response.",
+    "steps": ["Open JARVIS", "Send the message \"Hello JARVIS\"", "Inspect the assistant reply"],
+    "expected": "JARVIS returns a non-empty assistant response instead of the temporary AI-core-unavailable message."
+  },
+  {
+    "name": "Connect and inspect the YouTube authorization center",
+    "viewport": "desktop",
+    "covers": ["YouTube connection center", "/api/youtube/status", "/api/youtube/connect", "Google OAuth guardrail"],
+    "description": "Verifies JARVIS exposes an honest YouTube connection state and does not pretend an account is connected when OAuth credentials are missing.",
+    "steps": ["Open Empire Command", "Open THE FOREST", "Inspect YouTube Connection Center", "Inspect the connection status and setup message"],
+    "expected": "The YouTube Connection Center is visible and reports either the real connected channel or that Google OAuth setup is required; it never claims a channel is connected without confirmed authorization."
+  },
+  {
+    "name": "Generate and display an image in JARVIS Image Lab",
+    "viewport": "desktop",
+    "covers": ["AI Image Lab", "/api/image/generate backend route", "rendered generated image", "reference-image editing path"],
+    "description": "Verifies Image Lab sends an image prompt to the backend image generator and renders the returned image instead of exposing raw JSON.",
+    "steps": ["Open JARVIS", "Open Image Lab", "Enter the prompt \"A futuristic aircraft above a neon city at night\"", "Click Generate Image", "Inspect the result preview"],
+    "expected": "A generated image is rendered inside Image Lab; the interface shows the visual result rather than only JSON or a text response."
+  },
+  {
+    "name": "Run the NEXORA complete simulated trading cycle",
+    "viewport": "desktop",
+    "covers": ["NEXORA one-button cycle", "paper order entry", "simulated market movement", "paper position close", "P&L settlement", "risk-state update"],
+    "description": "Verifies one button completes the entire NEXORA paper-trading lifecycle and renders a durable result summary.",
+    "steps": ["Open Empire Command", "Confirm the Empire Command panel is visible", "Open NEXORA EMPIRE", "Click Run Complete Trading Cycle", "Inspect the entry, exit, P&L, outcome, and five cycle steps"],
+    "expected": "A complete simulated cycle is recorded with entry and exit prices, net P&L, outcome, lifecycle steps, and the updated Prime trade count; the panel states that it is simulation only."
+  },
+  {
+    "name": "Open and run the isolated 10-bot ordinary worker fleet",
+    "viewport": "desktop",
+    "covers": ["10-bot ordinary worker fleet", "independent bot records", "paper cycle", "fleet P&L", "simulation-only guardrail"],
+    "description": "Verifies the worker fleet opens independently from NEXORA PRIME and records a simulated cycle for ten ordinary bots.",
+    "steps": ["Open Empire Command", "Confirm the Empire Command panel is visible", "Open NEXORA EMPIRE", "Click Open 10-Bot Fleet", "Click Start 10-Bot Paper Cycle", "Inspect the ten bot records"],
+    "expected": "The isolated fleet panel opens, shows ten named BOT records with individual balances and trade statistics, and after one cycle shows updated trades and fleet P&L while stating that the engine is simulation only."
+  },
+  {
+    "name": "Open JARVIS Capability Center and inspect the 18-office registry",
+    "viewport": "desktop",
+    "covers": ["self-aware capability registry", "18-office registry", "capability status reporting"],
+    "description": "Verifies JARVIS exposes a user-visible capability map with all 18 offices and honest readiness states.",
+    "steps": ["Open JARVIS", "Open Capability Center", "Inspect the capability summary and office registry"],
+    "expected": "Capability Center is visible, reports 18 offices, and distinguishes ready, authorization-required, planned, and demo-only capabilities."
+  },
+  {
+    "name": "Use Forest Video Studio planning without falsely claiming final video generation",
+    "viewport": "desktop",
+    "covers": ["Forest AI video planning", "persistent character IDs", "scene planning", "honest video capability status"],
+    "description": "Verifies the existing Forest Studio planning workflow remains available and distinguishes generated visual assets from final video-provider output.",
+    "steps": ["Open Empire Command", "Open VIDEO STUDIO", "Generate AI Video Plan", "Inspect the production pipeline status"],
+    "expected": "A structured video plan can be displayed when the connected service responds, and the UI does not label generated stills as final photoreal video."
+  },
+  {
+    "name": "Filter the Capability Center to attention items on mobile",
+    "viewport": "mobile",
+    "covers": ["capability filters", "mobile Capability Center", "authorization and planned states"],
+    "description": "Verifies the Capability Center remains usable on mobile and can isolate capabilities that need attention.",
+    "steps": ["Open Capability Center", "Tap Needs attention", "Inspect the filtered capability cards"],
+    "expected": "The mobile panel remains readable and shows only capabilities whose state is not READY."
+  }
+]
