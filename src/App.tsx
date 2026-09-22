@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import EmpireDashboard from './EmpireDashboard';
 import CapabilityCenter from './CapabilityCenter';
 import './EmpireDashboard.css';
-import { api, image } from '@appdeploy/client';
+import { api, image } from './api';
 import {
   Mic,
   MicOff,
