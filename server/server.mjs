@@ -1,0 +1,254 @@
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import crypto from 'node:crypto';
+
+const PORT = Number(process.env.PORT || 10000);
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const DIST = path.join(ROOT, 'dist');
+
+const HF_CHAT_URL = 'https://router.huggingface.co/v1/chat/completions';
+const HF_MODEL = process.env.HF_MODEL || 'openai/gpt-oss-120b:fastest';
+const GOOGLE_TTS_URL = 'https://texttospeech.googleapis.com/v1/text:synthesize';
+const YOUTUBE_CLIENT_ID = process.env.GOOGLE_YOUTUBE_CLIENT_ID || '';
+const YOUTUBE_CLIENT_SECRET = process.env.GOOGLE_YOUTUBE_CLIENT_SECRET || '';
+const PUBLIC_URL = (process.env.PUBLIC_URL || '').replace(/\/$/, '');
+
+const oauthStates = new Map();
+let youtubeConnection = null;
+
+function json(res, status, payload) {
+  const body = JSON.stringify(payload);
+  res.writeHead(status, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store',
+  });
+  res.end(body);
+}
+
+function redirect(res, location) {
+  res.writeHead(302, { Location: location });
+  res.end();
+}
+
+function parseBody(req) {
+  return new Promise((resolve, reject) => {
+    let raw = '';
+    req.on('data', chunk => {
+      raw += chunk;
+      if (raw.length > 12_000_000) {
+        req.destroy();
+        reject(new Error('Request body is too large.'));
+      }
+    });
+    req.on('end', () => {
+      try { resolve(raw ? JSON.parse(raw) : {}); } catch { reject(new Error('Invalid JSON body.')); }
+    });
+    req.on('error', reject);
+  });
+}
+
+function safePath(urlPath) {
+  const decoded = decodeURIComponent(urlPath.split('?')[0]);
+  const requested = decoded === '/' ? '/index.html' : decoded;
+  const target = path.normalize(path.join(DIST, requested));
+  return target.startsWith(DIST) ? target : null;
+}
+
+async function handleApi(req, res, pathname, url) {
+  if (req.method === 'GET' && pathname === '/api/_healthcheck') {
+    return json(res, 200, { message: 'Success', service: 'JARVIS', deployment: 'render' });
+  }
+
+  if (req.method === 'GET' && pathname === '/api/tts/status') {
+    return json(res, 200, {
+      configured: Boolean(process.env.GOOGLE_CLOUD_TTS_API_KEY),
+      provider: 'Google Cloud Text-to-Speech',
+    });
+  }
+
+  if (req.method === 'POST' && pathname === '/api/tts/synthesize') {
+    const input = await parseBody(req);
+    const text = String(input.text || '').trim();
+    if (!text) return json(res, 400, { error: 'Text is required.' });
+    if (text.length > 5000) return json(res, 400, { error: 'Text is limited to 5,000 characters.' });
+    const apiKey = process.env.GOOGLE_CLOUD_TTS_API_KEY;
+    if (!apiKey) return json(res, 503, { error: 'Google Cloud TTS is not configured on this deployment.' });
+    const response = await fetch(`${GOOGLE_TTS_URL}?key=${encodeURIComponent(apiKey)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        input: { text },
+        voice: {
+          languageCode: String(input.languageCode || 'en-US'),
+          name: String(input.voice || 'en-US-Chirp3-HD-Achird'),
+        },
+        audioConfig: {
+          audioEncoding: 'MP3',
+          speakingRate: Math.min(1.25, Math.max(0.75, Number(input.speakingRate) || 0.96)),
+          pitch: Math.min(6, Math.max(-6, Number(input.pitch) || 0)),
+        },
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.audioContent) return json(res, response.status >= 400 && response.status < 500 ? 400 : 502, { error: data?.error?.message || 'Google TTS request failed.' });
+    return json(res, 200, { audioContent: data.audioContent, mimeType: 'audio/mpeg', voice: input.voice, languageCode: input.languageCode });
+  }
+
+  if (req.method === 'POST' && pathname === '/api/chat') {
+    const input = await parseBody(req);
+    const messages = Array.isArray(input.messages)
+      ? input.messages.filter(m => ['user', 'assistant', 'system', 'model'].includes(String(m?.role)) && String(m?.content || '').trim()).slice(-16)
+      : [];
+    if (!messages.length) return json(res, 400, { error: 'A message is required.' });
+    const token = process.env.HUGGINGFACE_API_TOKEN;
+    if (!token) return json(res, 503, { error: 'Hugging Face AI is not configured on this deployment.' });
+    const response = await fetch(HF_CHAT_URL, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: HF_MODEL,
+        messages: [
+          {
+            role: 'system',
+            content: "You are JARVIS, Saviour's helpful AI assistant. Be accurate, concise, friendly, and honest about capabilities. Do not claim an action happened unless the connected service confirms it. For security topics, stay defensive and educational. For NEXORA, keep trading simulated/paper-only.",
+          },
+          ...messages,
+        ],
+        max_tokens: 1200,
+        temperature: 0.7,
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) return json(res, response.status >= 400 && response.status < 500 ? 400 : 502, { error: data?.error?.message || 'Hugging Face AI request failed.' });
+    const text = String(data?.choices?.[0]?.message?.content || '').trim();
+    if (!text) return json(res, 502, { error: 'The AI core returned an empty response.' });
+    return json(res, 200, { text, provider: 'Hugging Face Inference Providers', model: HF_MODEL });
+  }
+
+  if (req.method === 'GET' && pathname === '/api/youtube/status') {
+    return json(res, 200, {
+      configured: Boolean(YOUTUBE_CLIENT_ID && YOUTUBE_CLIENT_SECRET && PUBLIC_URL),
+      connected: Boolean(youtubeConnection),
+      channel: youtubeConnection ? {
+        id: youtubeConnection.channelId,
+        title: youtubeConnection.channelTitle,
+        connectedAt: youtubeConnection.connectedAt,
+      } : null,
+    });
+  }
+
+  if (req.method === 'GET' && pathname === '/api/youtube/connect') {
+    if (!YOUTUBE_CLIENT_ID || !YOUTUBE_CLIENT_SECRET || !PUBLIC_URL) {
+      return json(res, 503, { error: 'YouTube OAuth is not configured. Add GOOGLE_YOUTUBE_CLIENT_ID, GOOGLE_YOUTUBE_CLIENT_SECRET and PUBLIC_URL.' });
+    }
+    const state = crypto.randomUUID();
+    const redirectUri = `${PUBLIC_URL}/api/youtube/callback`;
+    oauthStates.set(state, { redirectUri, createdAt: Date.now() });
+    const params = new URLSearchParams({
+      client_id: YOUTUBE_CLIENT_ID,
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      access_type: 'offline',
+      prompt: 'consent',
+      scope: 'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/yt-analytics.readonly',
+      state,
+    });
+    return json(res, 200, { authorizationUrl: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}` });
+  }
+
+  if (req.method === 'GET' && pathname === '/api/youtube/callback') {
+    const state = String(url.searchParams.get('state') || '');
+    const code = String(url.searchParams.get('code') || '');
+    const errorMessage = String(url.searchParams.get('error') || '');
+    if (errorMessage) return redirect(res, `/?youtube=error&message=${encodeURIComponent('Google authorization was not completed.')}`);
+    const pending = oauthStates.get(state);
+    if (!pending || !code || Date.now() - pending.createdAt > 10 * 60 * 1000) {
+      return redirect(res, '/?youtube=error&message=Authorization%20session%20expired');
+    }
+    try {
+      const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          code,
+          client_id: YOUTUBE_CLIENT_ID,
+          client_secret: YOUTUBE_CLIENT_SECRET,
+          redirect_uri: pending.redirectUri,
+          grant_type: 'authorization_code',
+        }),
+      });
+      const tokenData = await tokenResponse.json();
+      if (!tokenResponse.ok || !tokenData.access_token) throw new Error(tokenData.error_description || tokenData.error || 'Google token exchange failed.');
+      const channelResponse = await fetch('https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&mine=true', {
+        headers: { Authorization: `Bearer ${tokenData.access_token}` },
+      });
+      const channelData = await channelResponse.json();
+      const channel = channelData?.items?.[0];
+      if (!channel?.id) throw new Error('No YouTube channel was returned.');
+      youtubeConnection = {
+        channelId: String(channel.id),
+        channelTitle: String(channel.snippet?.title || 'YouTube Channel'),
+        refreshToken: String(tokenData.refresh_token || ''),
+        accessToken: String(tokenData.access_token),
+        expiresAt: Date.now() + Number(tokenData.expires_in || 3600) * 1000,
+        connectedAt: new Date().toISOString(),
+      };
+      oauthStates.delete(state);
+      return redirect(res, `/?youtube=connected&message=${encodeURIComponent(`YouTube connected: ${youtubeConnection.channelTitle}.`)}`);
+    } catch (error) {
+      console.error('YouTube OAuth callback error:', error);
+      return redirect(res, `/?youtube=error&message=${encodeURIComponent(error instanceof Error ? error.message : 'YouTube connection failed.')}`);
+    }
+  }
+
+  if (req.method === 'POST' && pathname === '/api/image/generate') {
+    return json(res, 503, { error: 'Image Lab migration is the next backend step. The JARVIS interface is preserved.' });
+  }
+
+  return json(res, 404, { error: 'API route not found.' });
+}
+
+function contentType(file) {
+  if (file.endsWith('.html')) return 'text/html; charset=utf-8';
+  if (file.endsWith('.js')) return 'text/javascript; charset=utf-8';
+  if (file.endsWith('.css')) return 'text/css; charset=utf-8';
+  if (file.endsWith('.json')) return 'application/json; charset=utf-8';
+  if (file.endsWith('.svg')) return 'image/svg+xml';
+  if (file.endsWith('.png')) return 'image/png';
+  if (file.endsWith('.jpg') || file.endsWith('.jpeg')) return 'image/jpeg';
+  if (file.endsWith('.webp')) return 'image/webp';
+  return 'application/octet-stream';
+}
+
+const server = http.createServer(async (req, res) => {
+  try {
+    const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+    if (url.pathname.startsWith('/api/')) return await handleApi(req, res, url.pathname, url);
+
+    const file = safePath(url.pathname);
+    if (!file) return json(res, 403, { error: 'Forbidden' });
+    fs.stat(file, (error, stat) => {
+      if (!error && stat.isFile()) {
+        res.writeHead(200, { 'Content-Type': contentType(file), 'Cache-Control': 'no-cache' });
+        fs.createReadStream(file).pipe(res);
+        return;
+      }
+      const index = path.join(DIST, 'index.html');
+      if (fs.existsSync(index)) {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
+        fs.createReadStream(index).pipe(res);
+      } else {
+        json(res, 404, { error: 'JARVIS build not found. Run npm run build first.' });
+      }
+    });
+  } catch (error) {
+    console.error('JARVIS server error:', error);
+    if (!res.headersSent) json(res, 500, { error: 'Internal server error.' });
+  }
+});
+
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`JARVIS listening on port ${PORT}`);
+});
