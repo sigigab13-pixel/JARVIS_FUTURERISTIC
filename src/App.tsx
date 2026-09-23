@@ -45,6 +45,7 @@ function App() {
   const [authReady, setAuthReady] = useState(false);
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState('');
+  const [entitlement, setEntitlement] = useState<any>(null);
   const [messages, setMessages] = useState<Message[]>(() => {
     try {
       const saved = localStorage.getItem('jarvis-history');
@@ -110,6 +111,17 @@ function App() {
     });
     return () => { active = false; listener.subscription.unsubscribe(); };
   }, []);
+
+  useEffect(() => {
+    if (!session) { setEntitlement(null); return; }
+    let active = true;
+    void api.get('/api/plans').then(response => {
+      if (active) setEntitlement(response.data?.entitlement || null);
+    }).catch(() => {
+      if (active) setEntitlement(null);
+    });
+    return () => { active = false; };
+  }, [session]);
 
   const signInWithGoogle = async () => {
     setAuthBusy(true);
@@ -500,6 +512,15 @@ function App() {
             <Shield size={16} />
             <span>Mode</span>
             <b>DEFENSIVE</b>
+          </div>
+          <div className="metric">
+            <Sparkles size={16} />
+            <span>Plan</span>
+            <b>{String(entitlement?.jarvis_plans?.name || entitlement?.plan_code || 'FREE').toUpperCase()}</b>
+          </div>
+          <div className="assistant-status-card">
+            <div><Sparkles size={14} /><span>IMAGE ALLOWANCE</span><b>{Number(entitlement?.credits_remaining ?? 0)}</b></div>
+            <small>Successful image generations remaining this period</small>
           </div>
           <div className="quick-title">ASSISTANT STATUS</div>
           <div className="assistant-status-card">
