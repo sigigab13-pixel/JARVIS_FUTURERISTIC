@@ -164,3 +164,80 @@ export async function getConversationMessages(userId, limit = 50) {
   );
   return (rows || []).map(m => ({ role: m.role, content: m.content }));
 }
+
+
+const EMBEDDING_FUNCTION_URL = SUPABASE_URL ? `${SUPABASE_URL}/functions/v1/jarvis-embed` : '';
+
+export async function generateJarvisEmbedding(input) {
+  const text = String(input || '').trim();
+  if (!configured || !EMBEDDING_FUNCTION_URL || !text) return null;
+  const response = await fetch(EMBEDDING_FUNCTION_URL, {
+    method: 'POST',
+    headers: {
+      apikey: SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ input: text.slice(0, 8000) }),
+  });
+  const body = await response.text();
+  if (!response.ok) {
+    throw new Error(`Embedding service failed (${response.status}): ${body.slice(0, 500)}`);
+  }
+  const data = body ? JSON.parse(body) : null;
+  return Array.isArray(data?.embedding) && data.embedding.length === 384 ? data.embedding : null;
+}
+
+export async function searchSemanticMemories(userId, input, options = {}) {
+  if (!configured || !validUuid(userId)) return [];
+  const embedding = await generateJarvisEmbedding(input);
+  if (!embedding) return [];
+  const threshold = Number(options.threshold ?? 0.72);
+  const count = Math.min(12, Math.max(1, Number(options.count) || 8));
+  return await rpc('match_jarvis_memories', {
+    query_embedding: embedding,
+    match_threshold: threshold,
+    match_count: count,
+    filter_user_id: userId,
+  });
+}
+
+export async function saveSemanticMemory(userId, content, metadata = {}, memoryType = 'semantic') {
+  if (!configured || !validUuid(userId)) return null;
+  const text = String(content || '').trim();
+  if (!text) return null;
+  const embedding = await generateJarvisEmbedding(text);
+  if (!embedding) return null;
+  const rows = await request('jarvis_semantic_memory', {
+    method: 'POST',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify({
+      user_id: userId,
+      memory_type: memoryType,
+      content: text.slice(0, 8000),
+      metadata,
+      embedding,
+      importance: Number(metadata.importance ?? 0.6),
+      last_accessed_at: new Date().toISOString(),
+    }),
+  });
+  return rows?.[0] || null;
+}
+
+async function rpc(name, body) {
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${name}`, {
+    method: 'POST',
+    headers: {
+      apikey: SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+  const raw = await response.text();
+  if (!response.ok) {
+    throw new Error(`Supabase RPC failed (${response.status}): ${raw.slice(0, 500)}`);
+  }
+  return raw ? JSON.parse(raw) : [];
+}
