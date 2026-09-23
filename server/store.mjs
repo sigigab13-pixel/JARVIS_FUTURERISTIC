@@ -294,3 +294,100 @@ async function rpc(name, body) {
   }
   return raw ? JSON.parse(raw) : [];
 }
+
+
+export async function getActivePlan(code = 'free') {
+  if (!configured) return { code, name: 'JARVIS Free', monthly_image_generations: 10 };
+  const rows = await request(
+    'jarvis_plans?select=*&code=eq.' + encodeURIComponent(code) + '&active=eq.true&limit=1'
+  );
+  return rows?.[0] || null;
+}
+
+export async function ensureJarvisEntitlement(userId) {
+  if (!validUuid(userId)) throw new Error('Invalid JARVIS user id.');
+  if (!configured) {
+    return { user_id: userId, plan_code: 'free', status: 'active', credits_remaining: 10 };
+  }
+
+  const existing = await request(
+    'jarvis_entitlements?select=*,jarvis_plans(code,name,monthly_image_generations,features)&user_id=eq.' +
+    encodeURIComponent(userId) + '&limit=1'
+  );
+  if (existing?.[0]) return existing[0];
+
+  const plan = await getActivePlan('free');
+  if (!plan?.id) throw new Error('JARVIS Free plan is not configured.');
+
+  const now = new Date();
+  const periodEnd = new Date(now);
+  periodEnd.setUTCMonth(periodEnd.getUTCMonth() + 1);
+
+  const rows = await request('jarvis_entitlements', {
+    method: 'POST',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify({
+      user_id: userId,
+      plan_id: plan.id,
+      status: 'active',
+      credits_remaining: Number(plan.monthly_image_generations || 0),
+      current_period_start: now.toISOString(),
+      current_period_end: periodEnd.toISOString(),
+    }),
+  });
+  return rows?.[0] || null;
+}
+
+export async function getJarvisEntitlement(userId) {
+  if (!validUuid(userId)) throw new Error('Invalid JARVIS user id.');
+  if (!configured) return { user_id: userId, plan_code: 'free', status: 'active', credits_remaining: 10 };
+  const rows = await request(
+    'jarvis_entitlements?select=*,jarvis_plans(code,name,monthly_image_generations,features)&user_id=eq.' +
+    encodeURIComponent(userId) + '&limit=1'
+  );
+  return rows?.[0] || null;
+}
+
+export async function consumeImageGeneration(userId, metadata = {}) {
+  const entitlement = await ensureJarvisEntitlement(userId);
+  const plan = entitlement?.jarvis_plans || {};
+  const limit = Number(plan.monthly_image_generations || 0);
+  const remaining = Number(entitlement?.credits_remaining ?? 0);
+  if (remaining <= 0) {
+    throw Object.assign(new Error('Your image-generation allowance is used up for this billing period.'), {
+      statusCode: 402,
+      code: 'IMAGE_ALLOWANCE_EXHAUSTED',
+    });
+  }
+
+  if (!configured) {
+    return { ...entitlement, credits_remaining: remaining - 1 };
+  }
+
+  const nextRemaining = remaining - 1;
+  await request(
+    'jarvis_entitlements?user_id=eq.' + encodeURIComponent(userId),
+    {
+      method: 'PATCH',
+      headers: { Prefer: 'return=minimal' },
+      body: JSON.stringify({
+        credits_remaining: nextRemaining,
+        updated_at: new Date().toISOString(),
+      }),
+    }
+  );
+
+  await request('jarvis_usage_ledger', {
+    method: 'POST',
+    headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify({
+      user_id: userId,
+      operation: 'image_generation',
+      units: 1,
+      credits_charged: 1,
+      metadata,
+    }),
+  });
+
+  return { ...entitlement, credits_remaining: nextRemaining };
+}
