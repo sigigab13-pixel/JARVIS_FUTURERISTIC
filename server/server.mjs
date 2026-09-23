@@ -54,6 +54,30 @@ function jarvisCookie(userId) {
   return `jarvis_user_id=${encodeURIComponent(userId)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000; Secure`;
 }
 
+async function requireAuthenticatedJarvisUser(req) {
+  const authorization = String(req.headers.authorization || '');
+  const match = authorization.match(/^Bearer\\s+(.+)$/i);
+  const accessToken = match?.[1]?.trim() || '';
+  if (!accessToken) throw Object.assign(new Error('Authentication required.'), { statusCode: 401 });
+
+  const supabaseUrl = (process.env.SUPABASE_URL || '').replace(/\\/$/, '');
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+  if (!supabaseUrl || !serviceRoleKey) {
+    throw Object.assign(new Error('Supabase authentication is not configured on this deployment.'), { statusCode: 503 });
+  }
+
+  const response = await fetch(supabaseUrl + '/auth/v1/user', {
+    headers: { apikey: serviceRoleKey, Authorization: 'Bearer ' + accessToken },
+  });
+  const user = await response.json().catch(() => ({}));
+  if (!response.ok || !user?.id) {
+    throw Object.assign(new Error('Your JARVIS session is invalid or expired.'), { statusCode: 401 });
+  }
+
+  const jarvisUser = await ensureJarvisAuthUser(user);
+  return { authUser: user, jarvisUser };
+}
+
 function redirect(res, location) {
   res.writeHead(302, { Location: location });
   res.end();
@@ -150,11 +174,9 @@ async function handleApi(req, res, pathname, url) {
   }
 
   if (req.method === 'GET' && pathname === '/api/chat/history') {
-    const existingUserId = getJarvisUserId(req);
-    const userId = existingUserId || crypto.randomUUID();
-    await ensureJarvisUser(userId);
-    const history = await getConversationMessages(userId, 100);
-    return json(res, 200, { messages: history, persistent: true }, existingUserId ? {} : { 'Set-Cookie': jarvisCookie(userId) });
+    const { jarvisUser } = await requireAuthenticatedJarvisUser(req);
+    const history = await getConversationMessages(jarvisUser.id, 100);
+    return json(res, 200, { messages: history, persistent: true }, { 'Set-Cookie': jarvisCookie(jarvisUser.id) });
   }
 
   if (req.method === 'POST' && pathname === '/api/chat') {
@@ -163,9 +185,8 @@ async function handleApi(req, res, pathname, url) {
       ? input.messages.filter(m => ['user', 'assistant', 'system', 'model'].includes(String(m?.role)) && String(m?.content || '').trim()).slice(-16)
       : [];
     if (!messages.length) return json(res, 400, { error: 'A message is required.' });
-    const existingUserId = getJarvisUserId(req);
-    const userId = existingUserId || crypto.randomUUID();
-    await ensureJarvisUser(userId);
+    const { jarvisUser } = await requireAuthenticatedJarvisUser(req);
+    const userId = jarvisUser.id;
     const token = process.env.HUGGINGFACE_API_TOKEN;
     if (!token) return json(res, 503, { error: 'Hugging Face AI is not configured on this deployment.' });
 
@@ -231,7 +252,7 @@ async function handleApi(req, res, pathname, url) {
       res,
       200,
       { text, provider: 'Hugging Face Inference Providers', model: HF_MODEL, persistent: true },
-      existingUserId ? {} : { 'Set-Cookie': jarvisCookie(userId) },
+      { 'Set-Cookie': jarvisCookie(userId) },
     );
   }
 
