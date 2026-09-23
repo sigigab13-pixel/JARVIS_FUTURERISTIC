@@ -119,6 +119,30 @@ export async function ensureJarvisAuthUser(authUser) {
   return rows?.[0] || { id, name, email, auth_user_id: authUserId, preferences: {} };
 }
 
+export async function getJarvisPreferences(userId) {
+  if (!validUuid(userId)) throw new Error('Invalid JARVIS user id.');
+  if (!configured) return memory.users.get(userId)?.preferences || {};
+  const rows = await request(`jarvis_users?select=preferences&id=eq.${encodeURIComponent(userId)}&limit=1`);
+  return rows?.[0]?.preferences || {};
+}
+
+export async function updateJarvisPreferences(userId, preferences) {
+  if (!validUuid(userId)) throw new Error('Invalid JARVIS user id.');
+  const safePreferences = preferences && typeof preferences === 'object' && !Array.isArray(preferences) ? preferences : {};
+  if (!configured) {
+    const user = memory.users.get(userId) || { id: userId, name: 'Guest' };
+    user.preferences = safePreferences;
+    memory.users.set(userId, user);
+    return safePreferences;
+  }
+  await request(`jarvis_users?id=eq.${encodeURIComponent(userId)}`, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify({ preferences: safePreferences, updated_at: new Date().toISOString() }),
+  });
+  return safePreferences;
+}
+
 export async function ensureJarvisUser(userId) {
   if (!validUuid(userId)) throw new Error('Invalid JARVIS user id.');
   if (!configured) {
