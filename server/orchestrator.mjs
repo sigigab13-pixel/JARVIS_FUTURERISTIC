@@ -213,7 +213,11 @@ export function createJarvisOrchestrator({
   }
 
   function resolvePrevious(value, previousResult) {
-    if (value === '$previous') return previousResult;
+    if (typeof value === 'string' && value.startsWith('$previous')) {
+      if (value === '$previous') return previousResult;
+      const path = value.slice('$previous.'.length).split('.').filter(Boolean);
+      return path.reduce((current, key) => current?.[key], previousResult);
+    }
     if (Array.isArray(value)) return value.map(item => resolvePrevious(item, previousResult));
     if (!value || typeof value !== 'object') return value;
     return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, resolvePrevious(item, previousResult)]));
