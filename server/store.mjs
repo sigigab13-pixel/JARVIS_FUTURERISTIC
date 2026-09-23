@@ -90,6 +90,35 @@ function validUuid(value) {
   return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
+export async function ensureJarvisAuthUser(authUser) {
+  const authUserId = String(authUser?.id || '').trim();
+  if (!validUuid(authUserId)) throw new Error('Invalid Supabase auth user id.');
+  const email = String(authUser?.email || '').trim() || null;
+  const metadata = authUser?.user_metadata || {};
+  const name = String(metadata.full_name || metadata.name || email || 'JARVIS User').trim().slice(0, 200) || 'JARVIS User';
+  if (!configured) {
+    const id = crypto.randomUUID();
+    memory.users.set(id, { id, name, email, auth_user_id: authUserId });
+    return memory.users.get(id);
+  }
+  const existing = await request('jarvis_users?select=id,name,email,preferences,auth_user_id&auth_user_id=eq.' + encodeURIComponent(authUserId) + '&limit=1');
+  if (existing?.[0]) {
+    await request('jarvis_users?auth_user_id=eq.' + encodeURIComponent(authUserId), {
+      method: 'PATCH',
+      headers: { Prefer: 'return=minimal' },
+      body: JSON.stringify({ name, email, updated_at: new Date().toISOString() }),
+    });
+    return { ...existing[0], name, email };
+  }
+  const id = crypto.randomUUID();
+  const rows = await request('jarvis_users', {
+    method: 'POST',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify({ id, name, email, auth_user_id: authUserId, preferences: {} }),
+  });
+  return rows?.[0] || { id, name, email, auth_user_id: authUserId, preferences: {} };
+}
+
 export async function ensureJarvisUser(userId) {
   if (!validUuid(userId)) throw new Error('Invalid JARVIS user id.');
   if (!configured) {
