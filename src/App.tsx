@@ -81,6 +81,7 @@ function App() {
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const recognitionRef = useRef<any>(null);
   const passiveRecognitionRef = useRef<any>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -142,41 +143,30 @@ function App() {
     return () => { active = false; };
   }, []);
 
-  const speak = (text: string) => {
-    if (!voiceEnabled || !('speechSynthesis' in window)) return;
-    const synth = window.speechSynthesis;
-    synth.cancel();
-    const speakNow = () => {
-      const voices = synth.getVoices();
-      const preferred = voices.find(voice => /natural|premium|enhanced/i.test(voice.name))
-        || voices.find(voice => /Ava|Samantha|Daniel|Karen/i.test(voice.name) && /^en(-|_)/i.test(voice.lang))
-        || voices.find(voice => /Google US English|Microsoft .* Online/i.test(voice.name))
-        || voices.find(voice => /^en(-|_)/i.test(voice.lang))
-        || voices[0];
-      const utterance = new SpeechSynthesisUtterance(text);
-      if (preferred) utterance.voice = preferred;
-      utterance.lang = preferred?.lang || 'en-US';
-      utterance.rate = 0.92;
-      utterance.pitch = 0.98;
-      utterance.volume = 1;
-      utterance.onstart = () => setSpeaking(true);
-      utterance.onend = () => setSpeaking(false);
-      utterance.onerror = () => setSpeaking(false);
-      synth.speak(utterance);
-    };
-    const voices = synth.getVoices();
-    if (voices.length) {
-      speakNow();
-    } else {
-      const loadVoices = () => {
-        synth.removeEventListener('voiceschanged', loadVoices);
-        speakNow();
+  const speak = async (text: string) => {
+    if (!voiceEnabled || !text.trim()) return;
+    try {
+      audioRef.current?.pause();
+      audioRef.current = null;
+      setSpeaking(true);
+      const response = await api.post('/api/tts/synthesize', { text: text.slice(0, 5000) });
+      const audioContent = String(response.data?.audioContent || '');
+      const mimeType = String(response.data?.mimeType || 'audio/mpeg');
+      if (!audioContent) throw new Error('No audio returned.');
+      const audio = new Audio('data:' + mimeType + ';base64,' + audioContent);
+      audioRef.current = audio;
+      audio.onended = () => {
+        if (audioRef.current === audio) audioRef.current = null;
+        setSpeaking(false);
       };
-      synth.addEventListener('voiceschanged', loadVoices);
-      window.setTimeout(() => {
-        synth.removeEventListener('voiceschanged', loadVoices);
-        if (!synth.speaking) speakNow();
-      }, 800);
+      audio.onerror = () => {
+        if (audioRef.current === audio) audioRef.current = null;
+        setSpeaking(false);
+      };
+      await audio.play();
+    } catch {
+      setSpeaking(false);
+      // Keep the chat usable if ElevenLabs is temporarily unavailable.
     }
   };
 
@@ -216,7 +206,7 @@ function App() {
         ...current,
         { role: 'assistant', content: answer },
       ]);
-      // Chat responses stay text-only unless voice output is explicitly enabled.
+      if (voiceEnabled) void speak(answer);
     } catch {
       setMessages(current => [
         ...current,
@@ -313,7 +303,8 @@ function App() {
 
   const clearMemory = () => {
     localStorage.removeItem('jarvis-history');
-    window.speechSynthesis?.cancel();
+    audioRef.current?.pause();
+    audioRef.current = null;
     setMessages(starter);
   };
 
@@ -434,6 +425,7 @@ function App() {
     stopCamera();
     recognitionRef.current?.stop();
     passiveRecognitionRef.current?.stop();
+    audioRef.current?.pause();
   }, []);
 
   useEffect(() => {
