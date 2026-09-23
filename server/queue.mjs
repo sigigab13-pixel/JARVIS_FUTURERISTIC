@@ -26,18 +26,18 @@ async function redis(command) {
 }
 
 export function createQueueMessage(jobId, type = 'jarvis') {
-  return JSON.stringify({
+  return {
     id: crypto.randomUUID(),
     jobId: String(jobId),
     type: String(type || 'jarvis'),
     enqueuedAt: new Date().toISOString(),
-  });
+  };
 }
 
 export async function enqueueJob(jobId, type = 'jarvis') {
   const message = createQueueMessage(jobId, type);
-  await redis(['LPUSH', 'jarvis:jobs', message]);
-  return JSON.parse(message);
+  await redis(['LPUSH', 'jarvis:jobs', JSON.stringify(message)]);
+  return message;
 }
 
 export async function dequeueJob() {
