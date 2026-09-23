@@ -77,6 +77,13 @@ function App() {
   const [business, setBusiness] = useState<any>(null);
   const [brandKit, setBrandKit] = useState<any>(null);
   const [businessBusy, setBusinessBusy] = useState(false);
+  const [videoOpen, setVideoOpen] = useState(false);
+  const [videoProjects, setVideoProjects] = useState<any[]>([]);
+  const [videoProject, setVideoProject] = useState<any>(null);
+  const [videoCharacters, setVideoCharacters] = useState<any[]>([]);
+  const [videoScenes, setVideoScenes] = useState<any[]>([]);
+  const [videoBusy, setVideoBusy] = useState(false);
+  const [videoError, setVideoError] = useState('');
   const [securityOpen, setSecurityOpen] = useState(false);
   const [cameraActive, setCameraActive] = useState(false);
   const [cameraStatus, setCameraStatus] = useState('Not tested');
@@ -458,6 +465,106 @@ function App() {
     } finally { setBusinessBusy(false); }
   };
 
+  const openVideoStudio = async () => {
+    setVideoOpen(true);
+    setVideoError('');
+    setVideoBusy(true);
+    try {
+      const response = await api.get('/api/video/projects');
+      const projects = Array.isArray(response.data?.projects) ? response.data.projects : [];
+      setVideoProjects(projects);
+      if (projects[0]) {
+        const project = projects[0];
+        setVideoProject(project);
+        const [characters, scenes] = await Promise.all([
+          api.get('/api/video/projects/' + project.id + '/characters'),
+          api.get('/api/video/projects/' + project.id + '/scenes'),
+        ]);
+        setVideoCharacters(characters.data?.characters || []);
+        setVideoScenes(scenes.data?.scenes || []);
+      }
+    } catch (error: any) {
+      setVideoError(error?.response?.data?.error || error?.message || 'Video Engine is unavailable for this plan.');
+    } finally { setVideoBusy(false); }
+  };
+
+  const createVideoProject = async () => {
+    setVideoBusy(true); setVideoError('');
+    try {
+      const response = await api.post('/api/video/projects', {
+        title: 'New JARVIS Production',
+        description: 'Video production project',
+        format: '16:9',
+        story_bible: { premise: '', tone: '', continuity: {} },
+      });
+      const project = response.data?.project;
+      if (project) {
+        setVideoProject(project);
+        setVideoProjects(current => [project, ...current]);
+        setVideoCharacters([]);
+        setVideoScenes([]);
+      }
+    } catch (error: any) {
+      setVideoError(error?.response?.data?.error || 'Could not create the video project.');
+    } finally { setVideoBusy(false); }
+  };
+
+  const createVideoCharacter = async () => {
+    if (!videoProject) return;
+    setVideoBusy(true); setVideoError('');
+    try {
+      const response = await api.post('/api/video/projects/' + videoProject.id + '/characters', {
+        name: 'New Character',
+        role: 'Character',
+        profile: { personality: '', history: '', speaking_style: '' },
+        appearance: { face: '', hair: '', clothing: '', visual_identity: '' },
+        voice: { provider: 'elevenlabs', voice_id: '', speaking_style: '' },
+        wardrobe: { current: '', allowed_variations: [] },
+        relationships: {},
+        reference_assets: [],
+        continuity_rules: { identity_locked: true },
+      });
+      setVideoCharacters(current => [...current, response.data?.character].filter(Boolean));
+    } catch (error: any) {
+      setVideoError(error?.response?.data?.error || 'Could not create the character.');
+    } finally { setVideoBusy(false); }
+  };
+
+  const createVideoScene = async () => {
+    if (!videoProject) return;
+    setVideoBusy(true); setVideoError('');
+    try {
+      const response = await api.post('/api/video/projects/' + videoProject.id + '/scenes', {
+        scene_number: videoScenes.length + 1,
+        title: 'New Scene',
+        script: '',
+        dialogue: [],
+        characters: videoCharacters.map(character => character.id),
+        visual_plan: {},
+        camera_plan: {},
+        audio_plan: { voice_provider: 'elevenlabs' },
+        lip_sync_plan: { enabled: true, status: 'planned', character_audio_pairs: [] },
+        continuity_notes: { check_character_identity: true, check_world_assets: true },
+      });
+      setVideoScenes(current => [...current, response.data?.scene].filter(Boolean));
+    } catch (error: any) {
+      setVideoError(error?.response?.data?.error || 'Could not create the scene.');
+    } finally { setVideoBusy(false); }
+  };
+
+  const planVideoProduction = async () => {
+    if (!videoProject) return;
+    setVideoBusy(true); setVideoError('');
+    try {
+      await api.post('/api/video/projects/' + videoProject.id + '/plan', {
+        requested_outputs: ['storyboard', 'generation_plan', 'voice_plan', 'lip_sync_plan', 'qa_plan'],
+      });
+      setVideoError('Production plan queued successfully.');
+    } catch (error: any) {
+      setVideoError(error?.response?.data?.error || 'Could not queue the production plan.');
+    } finally { setVideoBusy(false); }
+  };
+
   const openCommand = (command: string) => {
     setCommandOpen(false);
     void sendMessage(command);
@@ -589,6 +696,9 @@ function App() {
           </button>
           <button className="system-button" onClick={() => void openBusinessCenter()}>
             <BrainCircuit size={15} /> Business Center
+          </button>
+          <button className="system-button" onClick={() => void openVideoStudio()}>
+            <Sparkles size={15} /> Video Studio
           </button>
           <button className="system-button" onClick={() => setImageLabOpen(true)}>
             <Sparkles size={15} /> Image Lab
@@ -756,6 +866,55 @@ function App() {
                 <button className="security-secondary" onClick={()=>void saveBrandKit()} disabled={businessBusy}>Save Brand Kit</button>
               </div>}
             </div>
+          </section>
+        </div>
+      )}
+
+      {videoOpen && (
+        <div className="security-overlay" role="dialog" aria-modal="true" aria-label="JARVIS Video Studio">
+          <section className="security-panel video-studio-panel">
+            <div className="security-head">
+              <div><span className="eyebrow">JARVIS VIDEO ENGINE</span><h2>Video Studio</h2><p>Story → Character Bible → Scenes → Voice → Lip-sync → QA → Render → Publish.</p></div>
+              <button className="close-security" onClick={() => setVideoOpen(false)} aria-label="Close Video Studio"><X size={18} /></button>
+            </div>
+            <div className="video-toolbar">
+              <button className="security-primary" onClick={() => void createVideoProject()} disabled={videoBusy}>New Production</button>
+              <button className="security-secondary" onClick={() => void createVideoCharacter()} disabled={videoBusy || !videoProject}>Add Character</button>
+              <button className="security-secondary" onClick={() => void createVideoScene()} disabled={videoBusy || !videoProject}>Add Scene</button>
+              <button className="security-secondary" onClick={() => void planVideoProduction()} disabled={videoBusy || !videoProject}>Plan Production</button>
+            </div>
+            {videoError && <div className="security-result"><AlertTriangle size={14} /> {videoError}</div>}
+            <div className="video-engine-grid">
+              <div className="video-card">
+                <span className="card-label">PRODUCTION</span>
+                <h3>{videoProject?.title || 'No production selected'}</h3>
+                <p>{videoProject?.description || 'Create a production to begin.'}</p>
+                <div className="video-tags"><span>{videoProject?.format || '16:9'}</span><span>{videoProject?.status || 'draft'}</span><span>Version {videoProject?.current_version || 1}</span></div>
+                <h4>Pipeline</h4>
+                <div className="video-pipeline">
+                  {['Story Director','Character Bible','World / Assets','Scene Director','Visual + Motion','Voice / Audio','Lip-sync','Editing','Continuity QA','Render / Publish'].map((item, i) => <div key={item}><b>{String(i+1).padStart(2,'0')}</b><span>{item}</span></div>)}
+                </div>
+              </div>
+              <div className="video-card">
+                <span className="card-label">CHARACTER BIBLE</span>
+                <h3>{videoCharacters.length} Characters</h3>
+                <p>Identity, appearance, voice, wardrobe, relationships and continuity are stored separately from scenes.</p>
+                <div className="video-list">{videoCharacters.map(character => <div key={character.id}><b>{character.name}</b><span>{character.role || 'Character'} • {character.voice?.provider || 'voice'} • identity locked</span></div>)}{!videoCharacters.length && <div className="video-empty">No characters yet.</div>}</div>
+              </div>
+              <div className="video-card">
+                <span className="card-label">SCENE DIRECTOR</span>
+                <h3>{videoScenes.length} Scenes</h3>
+                <p>Every scene carries dialogue, camera, visual, audio, continuity and lip-sync planning data.</p>
+                <div className="video-list">{videoScenes.map(scene => <div key={scene.id}><b>Scene {scene.scene_number}: {scene.title || 'Untitled'}</b><span>{scene.status} • lip-sync {scene.lip_sync_plan?.enabled ? 'enabled' : 'off'}</span></div>)}{!videoScenes.length && <div className="video-empty">No scenes yet.</div>}</div>
+              </div>
+              <div className="video-card">
+                <span className="card-label">LIP-SYNC</span>
+                <h3>Scene-aware synchronization</h3>
+                <p>JARVIS will map each character's voice track to the correct character and preserve timing through editing and rendering.</p>
+                <div className="video-checks"><span>✓ Character → voice mapping</span><span>✓ Dialogue timing</span><span>✓ Scene synchronization</span><span>✓ Final QA gate</span></div>
+              </div>
+            </div>
+            {videoProjects.length > 0 && <div className="video-projects"><b>Recent productions</b>{videoProjects.slice(0,5).map(project => <button key={project.id} onClick={async()=>{setVideoProject(project);const [c,s]=await Promise.all([api.get('/api/video/projects/'+project.id+'/characters'),api.get('/api/video/projects/'+project.id+'/scenes')]);setVideoCharacters(c.data?.characters||[]);setVideoScenes(s.data?.scenes||[]);}}>{project.title}</button>)}</div>}
           </section>
         </div>
       )}
