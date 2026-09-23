@@ -538,6 +538,29 @@ export async function addVideoCharacterForUser(userId, projectId, data = {}) {
   return rows?.[0] || null;
 }
 
+export async function updateVideoCharacterForUser(userId, projectId, characterId, data = {}) {
+  const project = await getVideoProjectForUser(userId, projectId);
+  if (!project) throw Object.assign(new Error('Video project not found.'), { statusCode: 404 });
+  if (!validUuid(characterId)) throw new Error('Invalid character identity.');
+  if (!configured) return { id: characterId, project_id: projectId, ...data };
+  const payload = {};
+  for (const key of ['name','role']) {
+    if (data[key] !== undefined) payload[key] = String(data[key] || '').trim().slice(0, 200) || null;
+  }
+  for (const key of ['profile','appearance','voice','wardrobe','relationships','continuity_rules']) {
+    if (data[key] !== undefined) payload[key] = data[key] && typeof data[key] === 'object' ? data[key] : {};
+  }
+  if (data.reference_assets !== undefined) payload.reference_assets = Array.isArray(data.reference_assets) ? data.reference_assets : [];
+  payload.version = 'version + 1';
+  payload.updated_at = new Date().toISOString();
+  const rows = await request('jarvis_video_characters?id=eq.' + encodeURIComponent(characterId) + '&project_id=eq.' + encodeURIComponent(projectId), {
+    method: 'PATCH',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify(payload),
+  });
+  return rows?.[0] || null;
+}
+
 export async function getVideoCharactersForUser(userId, projectId) {
   const project = await getVideoProjectForUser(userId, projectId);
   if (!project) throw Object.assign(new Error('Video project not found.'), { statusCode: 404 });
@@ -566,6 +589,29 @@ export async function addVideoSceneForUser(userId, projectId, data = {}) {
     method: 'POST',
     headers: { Prefer: 'return=representation' },
     body: JSON.stringify(scene),
+  });
+  return rows?.[0] || null;
+}
+
+export async function updateVideoSceneForUser(userId, projectId, sceneId, data = {}) {
+  const project = await getVideoProjectForUser(userId, projectId);
+  if (!project) throw Object.assign(new Error('Video project not found.'), { statusCode: 404 });
+  if (!validUuid(sceneId)) throw new Error('Invalid scene identity.');
+  if (!configured) return { id: sceneId, project_id: projectId, ...data };
+  const payload = {};
+  if (data.scene_number !== undefined) payload.scene_number = Math.max(1, Number(data.scene_number) || 1);
+  if (data.title !== undefined) payload.title = String(data.title || '').trim().slice(0, 200) || null;
+  if (data.script !== undefined) payload.script = String(data.script || '').trim().slice(0, 12000) || null;
+  for (const key of ['dialogue','characters']) if (data[key] !== undefined) payload[key] = Array.isArray(data[key]) ? data[key] : [];
+  for (const key of ['visual_plan','camera_plan','audio_plan','lip_sync_plan','continuity_notes']) {
+    if (data[key] !== undefined) payload[key] = data[key] && typeof data[key] === 'object' ? data[key] : {};
+  }
+  payload.version = Number(data.version || 1) + 1;
+  payload.updated_at = new Date().toISOString();
+  const rows = await request('jarvis_video_scenes?id=eq.' + encodeURIComponent(sceneId) + '&project_id=eq.' + encodeURIComponent(projectId), {
+    method: 'PATCH',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify(payload),
   });
   return rows?.[0] || null;
 }
