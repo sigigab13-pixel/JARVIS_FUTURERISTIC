@@ -15,6 +15,8 @@ import {
   ensureJarvisAuthUser,
   searchSemanticMemories,
   saveSemanticMemory,
+  getJarvisPreferences,
+  updateJarvisPreferences,
 } from './store.mjs';
 
 const PORT = Number(process.env.PORT || 10000);
@@ -24,6 +26,10 @@ const DIST = path.join(ROOT, 'dist');
 const HF_CHAT_URL = 'https://router.huggingface.co/v1/chat/completions';
 const HF_MODEL = process.env.HF_MODEL || 'openai/gpt-oss-120b:fastest';
 const GOOGLE_TTS_URL = 'https://texttospeech.googleapis.com/v1/text:synthesize';
+const ELEVENLABS_TTS_URL = 'https://api.elevenlabs.io/v1/text-to-speech';
+const ELEVENLABS_VOICES_URL = 'https://api.elevenlabs.io/v2/voices';
+const ELEVENLABS_MODEL = process.env.ELEVENLABS_MODEL || 'eleven_multilingual_v2';
+const ELEVENLABS_DEFAULT_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || '';
 const YOUTUBE_CLIENT_ID = process.env.GOOGLE_YOUTUBE_CLIENT_ID || '';
 const YOUTUBE_CLIENT_SECRET = process.env.GOOGLE_YOUTUBE_CLIENT_SECRET || '';
 const PUBLIC_URL = (process.env.PUBLIC_URL || '').replace(/\/$/, '');
@@ -124,9 +130,59 @@ export async function handleApi(req, res, pathname, url) {
 
   if (req.method === 'GET' && pathname === '/api/tts/status') {
     return json(res, 200, {
-      configured: Boolean(process.env.GOOGLE_CLOUD_TTS_API_KEY),
-      provider: 'Google Cloud Text-to-Speech',
+      configured: Boolean(process.env.ELEVENLABS_API_KEY),
+      provider: 'ElevenLabs',
+      model: ELEVENLABS_MODEL,
     });
+  }
+
+  if (req.method === 'GET' && pathname === '/api/voice/settings') {
+    const { jarvisUser } = await requireAuthenticatedJarvisUser(req);
+    const preferences = await getJarvisPreferences(jarvisUser.id);
+    return json(res, 200, {
+      voiceId: String(preferences?.voice_id || ELEVENLABS_DEFAULT_VOICE_ID || ''),
+      voiceEnabled: preferences?.voice_enabled !== false,
+    });
+  }
+
+  if (req.method === 'GET' && pathname === '/api/voices') {
+    await requireAuthenticatedJarvisUser(req);
+    const apiKey = process.env.ELEVENLABS_API_KEY || '';
+    if (!apiKey) return json(res, 503, { error: 'ElevenLabs is not configured on this deployment.' });
+    const response = await fetch(ELEVENLABS_VOICES_URL + '?page_size=50', {
+      headers: { 'xi-api-key': apiKey, Accept: 'application/json' },
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) return json(res, response.status >= 400 && response.status < 500 ? 400 : 502, { error: data?.detail?.message || data?.detail || 'ElevenLabs voice list request failed.' });
+    const voices = Array.isArray(data?.voices) ? data.voices : [];
+    return json(res, 200, {
+      voices: voices.map(voice => ({
+        voiceId: voice.voice_id,
+        name: voice.name,
+        category: voice.category,
+        description: voice.description || '',
+        labels: voice.labels || {},
+        previewUrl: voice.preview_url || null,
+      })),
+      nextPageToken: data?.next_page_token || null,
+    });
+  }
+
+  if (req.method === 'POST' && pathname === '/api/voice/select') {
+    const input = await parseBody(req);
+    const voiceId = String(input.voiceId || '').trim();
+    if (!voiceId || !/^[A-Za-z0-9_-]{8,128}$/.test(voiceId)) return json(res, 400, { error: 'A valid ElevenLabs voice ID is required.' });
+    const { jarvisUser } = await requireAuthenticatedJarvisUser(req);
+    const apiKey = process.env.ELEVENLABS_API_KEY || '';
+    if (!apiKey) return json(res, 503, { error: 'ElevenLabs is not configured on this deployment.' });
+    const response = await fetch('https://api.elevenlabs.io/v1/voices/' + encodeURIComponent(voiceId), {
+      headers: { 'xi-api-key': apiKey, Accept: 'application/json' },
+    });
+    const voice = await response.json().catch(() => ({}));
+    if (!response.ok || !voice?.voice_id) return json(res, 400, { error: 'That voice is not available to this JARVIS account.' });
+    const current = await getJarvisPreferences(jarvisUser.id);
+    const preferences = await updateJarvisPreferences(jarvisUser.id, { ...current, voice_id: voiceId });
+    return json(res, 200, { ok: true, voiceId: preferences.voice_id, voice: { voiceId: voice.voice_id, name: voice.name, previewUrl: voice.preview_url || null } });
   }
 
   if (req.method === 'POST' && pathname === '/api/tts/synthesize') {
@@ -134,29 +190,28 @@ export async function handleApi(req, res, pathname, url) {
     const text = String(input.text || '').trim();
     if (!text) return json(res, 400, { error: 'Text is required.' });
     if (text.length > 5000) return json(res, 400, { error: 'Text is limited to 5,000 characters.' });
-    const apiKey = process.env.GOOGLE_CLOUD_TTS_API_KEY;
-    if (!apiKey) return json(res, 503, { error: 'Google Cloud TTS is not configured on this deployment.' });
-    const response = await fetch(`${GOOGLE_TTS_URL}?key=${encodeURIComponent(apiKey)}`, {
+    const { jarvisUser } = await requireAuthenticatedJarvisUser(req);
+    const apiKey = process.env.ELEVENLABS_API_KEY || '';
+    if (!apiKey) return json(res, 503, { error: 'ElevenLabs is not configured on this deployment.' });
+    const preferences = await getJarvisPreferences(jarvisUser.id);
+    const voiceId = String(preferences?.voice_id || ELEVENLABS_DEFAULT_VOICE_ID || '').trim();
+    if (!voiceId) return json(res, 503, { error: 'No ElevenLabs voice is configured for this JARVIS account.' });
+    const response = await fetch(ELEVENLABS_TTS_URL + '/' + encodeURIComponent(voiceId) + '?output_format=mp3_44100_128', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'xi-api-key': apiKey, 'Content-Type': 'application/json', Accept: 'audio/mpeg' },
       body: JSON.stringify({
-        input: { text },
-        voice: {
-          languageCode: String(input.languageCode || 'en-US'),
-          name: String(input.voice || 'en-US-Chirp3-HD-Achird'),
-        },
-        audioConfig: {
-          audioEncoding: 'MP3',
-          speakingRate: Math.min(1.25, Math.max(0.75, Number(input.speakingRate) || 0.96)),
-          pitch: Math.min(6, Math.max(-6, Number(input.pitch) || 0)),
-        },
+        text,
+        model_id: ELEVENLABS_MODEL,
+        voice_settings: { stability: 0.5, similarity_boost: 0.8, style: 0.15, use_speaker_boost: true, speed: 0.96 },
       }),
     });
-    const data = await response.json();
-    if (!response.ok || !data.audioContent) return json(res, response.status >= 400 && response.status < 500 ? 400 : 502, { error: data?.error?.message || 'Google TTS request failed.' });
-    return json(res, 200, { audioContent: data.audioContent, mimeType: 'audio/mpeg', voice: input.voice, languageCode: input.languageCode });
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => '');
+      return json(res, response.status >= 400 && response.status < 500 ? 400 : 502, { error: errorBody.slice(0, 500) || 'ElevenLabs TTS request failed.' });
+    }
+    const audio = Buffer.from(await response.arrayBuffer()).toString('base64');
+    return json(res, 200, { audioContent: audio, mimeType: 'audio/mpeg', voiceId });
   }
-
   if (req.method === 'POST' && pathname === '/api/auth/sync') {
     const input = await parseBody(req);
     const accessToken = String(input.accessToken || '').trim();
