@@ -208,7 +208,7 @@ export async function saveSemanticMemory(userId, content, metadata = {}, memoryT
   if (!text) return null;
   const embedding = await generateJarvisEmbedding(text);
   if (!embedding) return null;
-  const rows = await request('jarvis_semantic_memory', {
+  const rows = await request('jarvis_semantic_memory?on_conflict=user_id,content_hash', {
     method: 'POST',
     headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
     body: JSON.stringify({
