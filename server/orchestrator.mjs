@@ -195,7 +195,15 @@ export function createJarvisOrchestrator({
   return {
     registry,
 
-    async run({ message, messages = [], action = 'auto', imagePrompt, referenceImage, videoProjectId, videoRequest = {} } = {}) {
+    async run({
+      message,
+      messages = [],
+      action = 'auto',
+      imagePrompt,
+      referenceImage,
+      videoProjectId,
+      videoRequest = {},
+    } = {}) {
       const latestMessage = String(message || messages[messages.length - 1]?.content || '').trim();
       if (!latestMessage) throw Object.assign(new Error('A message is required.'), { statusCode: 400 });
 
@@ -206,18 +214,25 @@ export function createJarvisOrchestrator({
 
       const lower = latestMessage.toLowerCase();
       const requestedAction = String(action || 'auto').toLowerCase();
-      const wantsImage = requestedAction === 'image' || (requestedAction === 'auto' && /\b(generate|create|make|draw)\b.{0,30}\b(image|picture|photo|artwork|logo)\b/i.test(lower));
-      const wantsVideo = requestedAction === 'video' || (requestedAction === 'auto' && /\b(plan|create|make|generate)\b.{0,30}\b(video|film|short|episode)\b/i.test(lower) && videoProjectId);
+      const wantsImage = requestedAction === 'image'
+        || (requestedAction === 'auto' && /\b(generate|create|make|draw)\b.{0,30}\b(image|picture|photo|artwork|logo)\b/i.test(lower));
+      const wantsVideo = requestedAction === 'video'
+        || (requestedAction === 'auto' && /\b(plan|create|make|generate)\b.{0,30}\b(video|film|short|episode)\b/i.test(lower));
 
       let selectedTool = 'chat.generate';
       let toolInput = { messages: normalizedMessages };
       let intent = 'conversation';
 
-      if (wantsImage && imagePrompt) {
+      if (wantsImage) {
+        const prompt = String(imagePrompt || latestMessage).trim();
+        if (!prompt) throw Object.assign(new Error('An image prompt is required.'), { statusCode: 400 });
         selectedTool = 'image.generate';
         intent = 'image_generation';
-        toolInput = { prompt: imagePrompt, referenceImage };
-      } else if (wantsVideo && videoProjectId) {
+        toolInput = { prompt, referenceImage };
+      } else if (wantsVideo) {
+        if (!videoProjectId) {
+          throw Object.assign(new Error('A video project id is required for video planning.'), { statusCode: 400 });
+        }
         selectedTool = 'video.plan';
         intent = 'video_planning';
         toolInput = { projectId: videoProjectId, request: videoRequest };
@@ -242,6 +257,7 @@ export function createJarvisOrchestrator({
       };
 
       const tool = registry.get(selectedTool);
+      if (!tool) throw new Error(`JARVIS tool is not registered: ${selectedTool}`);
       const result = await tool.execute(toolInput, {
         user: { id: userId },
         memories,
