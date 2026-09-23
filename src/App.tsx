@@ -84,6 +84,8 @@ function App() {
   const [videoScenes, setVideoScenes] = useState<any[]>([]);
   const [videoBusy, setVideoBusy] = useState(false);
   const [videoError, setVideoError] = useState('');
+  const [editingCharacter, setEditingCharacter] = useState<any>(null);
+  const [editingScene, setEditingScene] = useState<any>(null);
   const [securityOpen, setSecurityOpen] = useState(false);
   const [cameraActive, setCameraActive] = useState(false);
   const [cameraStatus, setCameraStatus] = useState('Not tested');
@@ -552,6 +554,36 @@ function App() {
     } finally { setVideoBusy(false); }
   };
 
+  const saveVideoCharacter = async () => {
+    if (!videoProject || !editingCharacter) return;
+    setVideoBusy(true); setVideoError('');
+    try {
+      const response = await api.patch('/api/video/projects/' + videoProject.id + '/characters/' + editingCharacter.id, editingCharacter);
+      const saved = response.data?.character;
+      if (saved) {
+        setVideoCharacters(current => current.map(item => item.id === saved.id ? saved : item));
+        setEditingCharacter(null);
+      }
+    } catch (error: any) {
+      setVideoError(error?.response?.data?.error || 'Could not save the character.');
+    } finally { setVideoBusy(false); }
+  };
+
+  const saveVideoScene = async () => {
+    if (!videoProject || !editingScene) return;
+    setVideoBusy(true); setVideoError('');
+    try {
+      const response = await api.patch('/api/video/projects/' + videoProject.id + '/scenes/' + editingScene.id, editingScene);
+      const saved = response.data?.scene;
+      if (saved) {
+        setVideoScenes(current => current.map(item => item.id === saved.id ? saved : item));
+        setEditingScene(null);
+      }
+    } catch (error: any) {
+      setVideoError(error?.response?.data?.error || 'Could not save the scene.');
+    } finally { setVideoBusy(false); }
+  };
+
   const planVideoProduction = async () => {
     if (!videoProject) return;
     setVideoBusy(true); setVideoError('');
@@ -899,13 +931,13 @@ function App() {
                 <span className="card-label">CHARACTER BIBLE</span>
                 <h3>{videoCharacters.length} Characters</h3>
                 <p>Identity, appearance, voice, wardrobe, relationships and continuity are stored separately from scenes.</p>
-                <div className="video-list">{videoCharacters.map(character => <div key={character.id}><b>{character.name}</b><span>{character.role || 'Character'} • {character.voice?.provider || 'voice'} • identity locked</span></div>)}{!videoCharacters.length && <div className="video-empty">No characters yet.</div>}</div>
+                <div className="video-list">{videoCharacters.map(character => <button className="video-list-item" key={character.id} onClick={() => setEditingCharacter(JSON.parse(JSON.stringify(character)))}><b>{character.name}</b><span>{character.role || 'Character'} • {character.voice?.provider || 'voice'} • {character.continuity_rules?.identity_locked === false ? 'identity editable' : 'identity locked'}</span></button>)}{!videoCharacters.length && <div className="video-empty">No characters yet.</div>}</div>
               </div>
               <div className="video-card">
                 <span className="card-label">SCENE DIRECTOR</span>
                 <h3>{videoScenes.length} Scenes</h3>
                 <p>Every scene carries dialogue, camera, visual, audio, continuity and lip-sync planning data.</p>
-                <div className="video-list">{videoScenes.map(scene => <div key={scene.id}><b>Scene {scene.scene_number}: {scene.title || 'Untitled'}</b><span>{scene.status} • lip-sync {scene.lip_sync_plan?.enabled ? 'enabled' : 'off'}</span></div>)}{!videoScenes.length && <div className="video-empty">No scenes yet.</div>}</div>
+                <div className="video-list">{videoScenes.map(scene => <button className="video-list-item" key={scene.id} onClick={() => setEditingScene(JSON.parse(JSON.stringify(scene)))}><b>Scene {scene.scene_number}: {scene.title || 'Untitled'}</b><span>{scene.status} • lip-sync {scene.lip_sync_plan?.enabled ? 'enabled' : 'off'}</span></button>)}{!videoScenes.length && <div className="video-empty">No scenes yet.</div>}</div>
               </div>
               <div className="video-card">
                 <span className="card-label">LIP-SYNC</span>
@@ -915,6 +947,44 @@ function App() {
               </div>
             </div>
             {videoProjects.length > 0 && <div className="video-projects"><b>Recent productions</b>{videoProjects.slice(0,5).map(project => <button key={project.id} onClick={async()=>{setVideoProject(project);const [c,s]=await Promise.all([api.get('/api/video/projects/'+project.id+'/characters'),api.get('/api/video/projects/'+project.id+'/scenes')]);setVideoCharacters(c.data?.characters||[]);setVideoScenes(s.data?.scenes||[]);}}>{project.title}</button>)}</div>}
+          </section>
+        </div>
+      )}
+
+      {editingCharacter && (
+        <div className="security-overlay" role="dialog" aria-modal="true" aria-label="Character Bible Editor">
+          <section className="security-panel" style={{ maxWidth: 860 }}>
+            <div className="security-head"><div><span className="eyebrow">CHARACTER BIBLE</span><h2>Edit {editingCharacter.name}</h2><p>Identity, appearance, voice, wardrobe and continuity are persistent production data.</p></div><button className="close-security" onClick={() => setEditingCharacter(null)} aria-label="Close character editor"><X size={18} /></button></div>
+            <div style={{display:'grid',gap:10}}>
+              <input value={editingCharacter.name || ''} onChange={e=>setEditingCharacter({...editingCharacter,name:e.target.value})} placeholder="Character name" />
+              <input value={editingCharacter.role || ''} onChange={e=>setEditingCharacter({...editingCharacter,role:e.target.value})} placeholder="Role" />
+              <textarea value={editingCharacter.profile?.personality || ''} onChange={e=>setEditingCharacter({...editingCharacter,profile:{...editingCharacter.profile,personality:e.target.value}})} placeholder="Personality" />
+              <textarea value={editingCharacter.profile?.history || ''} onChange={e=>setEditingCharacter({...editingCharacter,profile:{...editingCharacter.profile,history:e.target.value}})} placeholder="History / backstory" />
+              <textarea value={editingCharacter.profile?.speaking_style || ''} onChange={e=>setEditingCharacter({...editingCharacter,profile:{...editingCharacter.profile,speaking_style:e.target.value}})} placeholder="Speaking style" />
+              <textarea value={editingCharacter.appearance?.visual_identity || ''} onChange={e=>setEditingCharacter({...editingCharacter,appearance:{...editingCharacter.appearance,visual_identity:e.target.value}})} placeholder="Visual identity" />
+              <textarea value={editingCharacter.appearance?.clothing || ''} onChange={e=>setEditingCharacter({...editingCharacter,appearance:{...editingCharacter.appearance,clothing:e.target.value}})} placeholder="Appearance / clothing rules" />
+              <input value={editingCharacter.voice?.voice_id || ''} onChange={e=>setEditingCharacter({...editingCharacter,voice:{...editingCharacter.voice,voice_id:e.target.value}})} placeholder="ElevenLabs voice ID (optional)" />
+              <textarea value={editingCharacter.wardrobe?.current || ''} onChange={e=>setEditingCharacter({...editingCharacter,wardrobe:{...editingCharacter.wardrobe,current:e.target.value}})} placeholder="Current outfit" />
+              <textarea value={editingCharacter.continuity_rules?.notes || ''} onChange={e=>setEditingCharacter({...editingCharacter,continuity_rules:{...editingCharacter.continuity_rules,notes:e.target.value,identity_locked:true}})} placeholder="Continuity rules" />
+              <button className="security-primary" onClick={()=>void saveVideoCharacter()} disabled={videoBusy}>{videoBusy ? 'Saving...' : 'Save Character Bible'}</button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {editingScene && (
+        <div className="security-overlay" role="dialog" aria-modal="true" aria-label="Scene Director Editor">
+          <section className="security-panel" style={{ maxWidth: 860 }}>
+            <div className="security-head"><div><span className="eyebrow">SCENE DIRECTOR</span><h2>Edit Scene {editingScene.scene_number}</h2><p>Write the actual scene script and production direction before generation.</p></div><button className="close-security" onClick={() => setEditingScene(null)} aria-label="Close scene editor"><X size={18} /></button></div>
+            <div style={{display:'grid',gap:10}}>
+              <input value={editingScene.title || ''} onChange={e=>setEditingScene({...editingScene,title:e.target.value})} placeholder="Scene title" />
+              <textarea style={{minHeight:180}} value={editingScene.script || ''} onChange={e=>setEditingScene({...editingScene,script:e.target.value})} placeholder="Scene script, action and dialogue..." />
+              <textarea value={editingScene.visual_plan?.description || ''} onChange={e=>setEditingScene({...editingScene,visual_plan:{...editingScene.visual_plan,description:e.target.value}})} placeholder="Visual direction" />
+              <textarea value={editingScene.camera_plan?.shots || ''} onChange={e=>setEditingScene({...editingScene,camera_plan:{...editingScene.camera_plan,shots:e.target.value}})} placeholder="Camera / shot direction" />
+              <textarea value={editingScene.audio_plan?.notes || ''} onChange={e=>setEditingScene({...editingScene,audio_plan:{...editingScene.audio_plan,notes:e.target.value}})} placeholder="Voice, music and sound direction" />
+              <textarea value={editingScene.continuity_notes?.notes || ''} onChange={e=>setEditingScene({...editingScene,continuity_notes:{...editingScene.continuity_notes,notes:e.target.value}})} placeholder="Continuity notes" />
+              <button className="security-primary" onClick={()=>void saveVideoScene()} disabled={videoBusy}>{videoBusy ? 'Saving...' : 'Save Scene Director'}</button>
+            </div>
           </section>
         </div>
       )}
