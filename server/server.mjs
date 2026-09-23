@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import crypto from 'node:crypto';
+import { createJarvisOrchestrator } from './orchestrator.mjs';
 import {
   ensureJarvisUser,
   getConversationMessages,
@@ -388,6 +389,60 @@ export async function handleApi(req, res, pathname, url) {
     if (!response.ok || !user?.id) return json(res, 401, { error: 'Your JARVIS session is invalid or expired.' });
     const jarvisUser = await ensureJarvisAuthUser(user);
     return json(res, 200, { ok: true, user: { id: jarvisUser.id, name: jarvisUser.name, email: jarvisUser.email || user.email || null } }, { 'Set-Cookie': jarvisCookie(jarvisUser.id) });
+  }
+
+  if (req.method === 'POST' && pathname === '/api/jarvis') {
+    const input = await parseBody(req);
+    const messages = Array.isArray(input.messages)
+      ? input.messages.filter(m => ['user', 'assistant', 'system', 'model'].includes(String(m?.role)) && String(m?.content || '').trim()).slice(-16)
+      : [];
+    const message = String(input.message || messages[messages.length - 1]?.content || '').trim();
+    if (!message) return json(res, 400, { error: 'A message is required.' });
+
+    const { jarvisUser } = await requireAuthenticatedJarvisUser(req);
+    const token = process.env.HUGGINGFACE_API_TOKEN;
+    if (!token) return json(res, 503, { error: 'Hugging Face AI is not configured on this deployment.' });
+
+    let semanticMemories = [];
+    try {
+      semanticMemories = await searchSemanticMemories(jarvisUser.id, message, { threshold: 0.72, count: 8 });
+    } catch (memoryError) {
+      console.error('JARVIS orchestrator memory retrieval error:', memoryError);
+    }
+
+    const preferences = await getJarvisPreferences(jarvisUser.id);
+    const orchestrator = createJarvisOrchestrator({
+      userId: jarvisUser.id,
+      memories: semanticMemories,
+      preferences,
+      hfToken: token,
+      model: HF_MODEL,
+    });
+
+    const result = await orchestrator.run({ message, messages });
+    if (!result.success) return json(res, 502, result);
+
+    const responseText = String(result.response?.text || '').trim();
+    const shouldRemember = /\b(remember|don't forget|do not forget|keep in mind|i prefer|i like|my favorite|i want|my goal|i plan to|i am building|i'm building|we decided|from now on|call me)\b/i.test(message)
+      && message.length >= 12;
+
+    if (shouldRemember) {
+      try {
+        await saveSemanticMemory(jarvisUser.id, message, {
+          source: 'orchestrator',
+          importance: /\b(remember|don't forget|do not forget|from now on|call me)\b/i.test(message) ? 0.9 : 0.7,
+        }, 'chat_memory');
+      } catch (memoryError) {
+        console.error('JARVIS orchestrator memory save error:', memoryError);
+      }
+    }
+
+    await appendConversationMessages(jarvisUser.id, [
+      { role: 'user', content: message },
+      { role: 'assistant', content: responseText },
+    ]);
+
+    return json(res, 200, { ...result, conversationId: jarvisUser.id, persistent: true }, { 'Set-Cookie': jarvisCookie(jarvisUser.id) });
   }
 
   if (req.method === 'GET' && pathname === '/api/chat/history') {
