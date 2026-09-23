@@ -41,6 +41,7 @@ export function createJarvisOrchestrator({
   preferences = {},
   hfToken,
   model,
+  capabilities = {},
 }) {
   if (!userId) throw new Error('JARVIS orchestrator requires a user id.');
   if (!hfToken) throw Object.assign(new Error('Hugging Face AI is not configured on this deployment.'), { statusCode: 503 });
@@ -50,16 +51,16 @@ export function createJarvisOrchestrator({
   registry.register({
     name: 'system.health',
     description: 'Inspect non-secret configuration and runtime readiness for JARVIS services.',
-    version: '1.0.0',
+    version: '1.1.0',
     capabilities: ['diagnostics'],
     requiresAuth: true,
     requiresApproval: false,
     inputSchema: { type: 'object' },
     outputSchema: { type: 'object', required: ['services'] },
-    execute: async (_input, _context) => {
+    execute: async () => {
       const startedAt = new Date().toISOString();
       const services = {
-        supabase: Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY),
+        supabase: Boolean(process.env.SUPABASE_URL && (process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY)),
         ai: Boolean(process.env.HUGGINGFACE_API_TOKEN),
         redis: Boolean(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN),
         mediaStorage: Boolean(process.env.R2_ENDPOINT && process.env.R2_ACCESS_KEY_ID && process.env.R2_SECRET_ACCESS_KEY && process.env.R2_BUCKET),
@@ -73,15 +74,84 @@ export function createJarvisOrchestrator({
   });
 
   registry.register({
+    name: 'memory.search',
+    description: 'Search JARVIS long-term semantic memory for context relevant to the current request.',
+    version: '1.0.0',
+    capabilities: ['memory', 'retrieval'],
+    requiresAuth: true,
+    requiresApproval: false,
+    inputSchema: { type: 'object', required: ['query'] },
+    outputSchema: { type: 'object', required: ['memories'] },
+    execute: async (input) => {
+      const startedAt = new Date().toISOString();
+      try {
+        if (typeof capabilities.searchMemory !== 'function') throw new Error('Memory search capability is not connected.');
+        const query = String(input?.query || '').trim();
+        if (!query) throw new Error('A memory search query is required.');
+        const found = await capabilities.searchMemory(query, { threshold: 0.72, count: Number(input?.count || 8) });
+        return toolResult('memory.search', startedAt, { memories: Array.isArray(found) ? found : [] });
+      } catch (error) {
+        return toolResult('memory.search', startedAt, undefined, error);
+      }
+    },
+  });
+
+  registry.register({
+    name: 'image.generate',
+    description: 'Generate an image by delegating to JARVIS\' existing Hugging Face image engine.',
+    version: '1.0.0',
+    capabilities: ['image', 'creative'],
+    requiresAuth: true,
+    requiresApproval: false,
+    inputSchema: { type: 'object', required: ['prompt'] },
+    outputSchema: { type: 'object', required: ['image'] },
+    execute: async (input) => {
+      const startedAt = new Date().toISOString();
+      try {
+        if (typeof capabilities.generateImage !== 'function') throw new Error('Image generation capability is not connected.');
+        const prompt = String(input?.prompt || '').trim();
+        if (!prompt) throw new Error('An image prompt is required.');
+        const result = await capabilities.generateImage({ prompt, referenceImage: input?.referenceImage || null });
+        return toolResult('image.generate', startedAt, result);
+      } catch (error) {
+        return toolResult('image.generate', startedAt, undefined, error);
+      }
+    },
+  });
+
+  registry.register({
+    name: 'video.plan',
+    description: 'Create a queued video-planning job by delegating to JARVIS\' existing Video Engine.',
+    version: '1.0.0',
+    capabilities: ['video', 'planning', 'jobs'],
+    requiresAuth: true,
+    requiresApproval: false,
+    inputSchema: { type: 'object', required: ['projectId'] },
+    outputSchema: { type: 'object', required: ['job'] },
+    execute: async (input) => {
+      const startedAt = new Date().toISOString();
+      try {
+        if (typeof capabilities.planVideo !== 'function') throw new Error('Video planning capability is not connected.');
+        const projectId = String(input?.projectId || '').trim();
+        if (!projectId) throw new Error('A video project id is required.');
+        const result = await capabilities.planVideo(projectId, input?.request || {});
+        return toolResult('video.plan', startedAt, result);
+      } catch (error) {
+        return toolResult('video.plan', startedAt, undefined, error);
+      }
+    },
+  });
+
+  registry.register({
     name: 'chat.generate',
     description: 'Generate a JARVIS response through the configured AI provider.',
-    version: '1.0.0',
+    version: '1.1.0',
     capabilities: ['chat', 'reasoning'],
     requiresAuth: false,
     requiresApproval: false,
     inputSchema: { type: 'object', required: ['messages'] },
     outputSchema: { type: 'object', required: ['text'] },
-    execute: async (input, context) => {
+    execute: async (input) => {
       const startedAt = new Date().toISOString();
       try {
         const memoryContext = memories.length
@@ -96,10 +166,7 @@ export function createJarvisOrchestrator({
 
         const response = await fetch(HF_CHAT_URL, {
           method: 'POST',
-          headers: {
-            Authorization: `Bearer ${hfToken}`,
-            'Content-Type': 'application/json',
-          },
+          headers: { Authorization: `Bearer ${hfToken}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
             model,
             messages: [{ role: 'system', content: systemMessage }, ...input.messages],
@@ -109,9 +176,7 @@ export function createJarvisOrchestrator({
         });
 
         const data = await response.json().catch(() => ({}));
-        if (!response.ok) {
-          throw new Error(data?.error?.message || 'Hugging Face AI request failed.');
-        }
+        if (!response.ok) throw new Error(data?.error?.message || 'Hugging Face AI request failed.');
 
         const text = String(data?.choices?.[0]?.message?.content || '').trim();
         if (!text) throw new Error('The AI core returned an empty response.');
@@ -130,7 +195,7 @@ export function createJarvisOrchestrator({
   return {
     registry,
 
-    async run({ message, messages = [] } = {}) {
+    async run({ message, messages = [], action = 'auto', imagePrompt, referenceImage, videoProjectId, videoRequest = {} } = {}) {
       const latestMessage = String(message || messages[messages.length - 1]?.content || '').trim();
       if (!latestMessage) throw Object.assign(new Error('A message is required.'), { statusCode: 400 });
 
@@ -139,22 +204,45 @@ export function createJarvisOrchestrator({
         .slice(-16)
         .map(item => ({ role: item.role, content: String(item.content).trim() }));
 
+      const lower = latestMessage.toLowerCase();
+      const requestedAction = String(action || 'auto').toLowerCase();
+      const wantsImage = requestedAction === 'image' || (requestedAction === 'auto' && /\b(generate|create|make|draw)\b.{0,30}\b(image|picture|photo|artwork|logo)\b/i.test(lower));
+      const wantsVideo = requestedAction === 'video' || (requestedAction === 'auto' && /\b(plan|create|make|generate)\b.{0,30}\b(video|film|short|episode)\b/i.test(lower) && videoProjectId);
+
+      let selectedTool = 'chat.generate';
+      let toolInput = { messages: normalizedMessages };
+      let intent = 'conversation';
+
+      if (wantsImage && imagePrompt) {
+        selectedTool = 'image.generate';
+        intent = 'image_generation';
+        toolInput = { prompt: imagePrompt, referenceImage };
+      } else if (wantsVideo && videoProjectId) {
+        selectedTool = 'video.plan';
+        intent = 'video_planning';
+        toolInput = { projectId: videoProjectId, request: videoRequest };
+      }
+
       const requestId = crypto.randomUUID();
       const plan = {
-        intent: 'conversation',
-        summary: 'Answer the user through the central JARVIS tool registry.',
+        intent,
+        summary: selectedTool === 'chat.generate'
+          ? 'Answer the user through the central JARVIS tool registry.'
+          : `Route the request to the ${selectedTool} capability through the central JARVIS tool registry.`,
         steps: [{
-          id: 'step_chat_generate',
-          tool: 'chat.generate',
-          purpose: 'Generate the assistant response.',
-          input: { messageCount: normalizedMessages.length },
+          id: `step_${selectedTool.replace(/[^a-z0-9]+/gi, '_')}`,
+          tool: selectedTool,
+          purpose: selectedTool === 'chat.generate' ? 'Generate the assistant response.' : 'Execute the requested JARVIS capability.',
+          input: selectedTool === 'chat.generate'
+            ? { messageCount: normalizedMessages.length }
+            : { delegated: true },
           requiresApproval: false,
         }],
         requiresApproval: false,
       };
 
-      const tool = registry.get('chat.generate');
-      const result = await tool.execute({ messages: normalizedMessages }, {
+      const tool = registry.get(selectedTool);
+      const result = await tool.execute(toolInput, {
         user: { id: userId },
         memories,
         preferences,
@@ -163,7 +251,8 @@ export function createJarvisOrchestrator({
       return {
         success: result.success,
         requestId,
-        response: result.success ? { text: result.data.text, metadata: { provider: result.data.provider, model: result.data.model } } : undefined,
+        response: result.success && result.data?.text ? { text: result.data.text, metadata: { provider: result.data.provider, model: result.data.model } } : undefined,
+        capability: result.success && result.data && !result.data.text ? result.data : undefined,
         execution: { plan, results: [result] },
         error: result.error,
       };
