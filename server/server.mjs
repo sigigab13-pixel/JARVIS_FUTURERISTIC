@@ -401,6 +401,9 @@ export async function handleApi(req, res, pathname, url) {
       preferences: await getJarvisPreferences(jarvisUser.id),
       hfToken: token,
       model: HF_MODEL,
+      capabilities: {
+        searchMemory: (query, options) => searchSemanticMemories(jarvisUser.id, query, options),
+      },
     });
 
     return json(res, 200, {
@@ -435,6 +438,48 @@ export async function handleApi(req, res, pathname, url) {
       preferences,
       hfToken: token,
       model: HF_MODEL,
+      capabilities: {
+        searchMemory: (query, options) => searchSemanticMemories(jarvisUser.id, query, options),
+        generateImage: async ({ prompt: imagePrompt, referenceImage }) => {
+          const entitlement = await getJarvisEntitlement(jarvisUser.id) || await ensureJarvisEntitlement(jarvisUser.id);
+          const remainingBefore = Number(entitlement?.credits_remaining ?? 0);
+          const blob = await generateHuggingFaceImage(
+            imagePrompt,
+            referenceImage ? HF_IMAGE_EDIT_MODEL : HF_IMAGE_MODEL,
+            referenceImage || null,
+          );
+          const consumed = await consumeImageGeneration(jarvisUser.id, {
+            prompt: imagePrompt.slice(0, 500),
+            mode: referenceImage ? 'edit' : 'generate',
+          });
+          const buffer = Buffer.from(await blob.arrayBuffer());
+          return {
+            image: { data: buffer.toString('base64'), mimeType: blob.type || 'image/png' },
+            allowance: { remaining: Number(consumed?.credits_remaining ?? remainingBefore - 1) },
+          };
+        },
+        planVideo: async (projectId, request) => {
+          const project = await getVideoProjectForUser(jarvisUser.id, projectId);
+          if (!project) throw new Error('Video project not found.');
+          const [characters, scenes] = await Promise.all([
+            getVideoCharactersForUser(jarvisUser.id, projectId),
+            getVideoScenesForUser(jarvisUser.id, projectId),
+          ]);
+          const job = await queueVideoJobForUser(jarvisUser.id, projectId, {
+            operation: 'plan',
+            format: project.format,
+            title: project.title,
+            story_bible: project.story_bible,
+            characters,
+            scenes,
+            request,
+          });
+          return {
+            job,
+            pipeline: ['story_director','character_bible','world_asset_bible','scene_director','storyboard_cost_gate','visual_generation','motion','voice_audio','lip_sync','editing','subtitles','continuity_brand_qa','repair_recovery','render','final_qa','publish'],
+          };
+        },
+      },
     });
 
     const result = await orchestrator.run({ message, messages });
