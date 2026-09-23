@@ -73,6 +73,10 @@ function App() {
   const [imageError, setImageError] = useState('');
   const [referenceImage, setReferenceImage] = useState<{ data: string; mimeType: string } | null>(null);
   const [referencePreview, setReferencePreview] = useState<string | null>(null);
+  const [businessOpen, setBusinessOpen] = useState(false);
+  const [business, setBusiness] = useState<any>(null);
+  const [brandKit, setBrandKit] = useState<any>(null);
+  const [businessBusy, setBusinessBusy] = useState(false);
   const [securityOpen, setSecurityOpen] = useState(false);
   const [cameraActive, setCameraActive] = useState(false);
   const [cameraStatus, setCameraStatus] = useState('Not tested');
@@ -428,6 +432,32 @@ function App() {
     runSecurityCheck();
   };
 
+  const openBusinessCenter = async () => {
+    setBusinessOpen(true);
+    try {
+      const response = await api.get('/api/business');
+      setBusiness(response.data?.business || null);
+      setBrandKit(response.data?.brandKit || null);
+    } catch {}
+  };
+
+  const saveBusiness = async () => {
+    setBusinessBusy(true);
+    try {
+      const response = await api.post('/api/business', business || { name: 'My Business' });
+      setBusiness(response.data?.business || business);
+    } finally { setBusinessBusy(false); }
+  };
+
+  const saveBrandKit = async () => {
+    if (!business) return;
+    setBusinessBusy(true);
+    try {
+      const response = await api.post('/api/business/brand-kit', brandKit || {});
+      setBrandKit(response.data?.brandKit || brandKit);
+    } finally { setBusinessBusy(false); }
+  };
+
   const openCommand = (command: string) => {
     setCommandOpen(false);
     void sendMessage(command);
@@ -556,6 +586,9 @@ function App() {
           </button>
           <button className="system-button" onClick={() => setCapabilityOpen(true)}>
             <BrainCircuit size={15} /> Capability Center
+          </button>
+          <button className="system-button" onClick={() => void openBusinessCenter()}>
+            <BrainCircuit size={15} /> Business Center
           </button>
           <button className="system-button" onClick={() => setImageLabOpen(true)}>
             <Sparkles size={15} /> Image Lab
@@ -696,6 +729,32 @@ function App() {
                   <BrainCircuit size={18} /><b>{title}</b><span>{prompt}</span>
                 </button>
               ))}
+            </div>
+          </section>
+        </div>
+      )}
+
+      {businessOpen && (
+        <div className="security-overlay" role="dialog" aria-modal="true" aria-label="JARVIS Business Center">
+          <section className="security-panel" style={{ maxWidth: 920 }}>
+            <div className="security-head">
+              <div><span className="eyebrow">BUSINESS OPERATIONS CORE</span><h2>JARVIS Business Center</h2><p>Manage your business profile and Brand Kit so JARVIS can use your business context across future tools.</p></div>
+              <button className="close-security" onClick={() => setBusinessOpen(false)} aria-label="Close business center"><X size={18} /></button>
+            </div>
+            <div style={{ display:'grid', gap:12 }}>
+              <input value={business?.name || ''} onChange={e=>setBusiness({...business, name:e.target.value})} placeholder="Business name" />
+              <input value={business?.industry || ''} onChange={e=>setBusiness({...business, industry:e.target.value})} placeholder="Industry" />
+              <input value={business?.website || ''} onChange={e=>setBusiness({...business, website:e.target.value})} placeholder="Website" />
+              <textarea value={business?.description || ''} onChange={e=>setBusiness({...business, description:e.target.value})} placeholder="What does your business do?" />
+              <button className="security-primary" onClick={()=>void saveBusiness()} disabled={businessBusy}>{businessBusy ? 'Saving...' : 'Save Business Profile'}</button>
+              {business && <div className="security-status">
+                <b>Brand Kit</b>
+                <input value={brandKit?.brand_voice || ''} onChange={e=>setBrandKit({...brandKit, brand_voice:e.target.value})} placeholder="Brand voice" />
+                <input value={brandKit?.visual_style || ''} onChange={e=>setBrandKit({...brandKit, visual_style:e.target.value})} placeholder="Visual style" />
+                <input value={brandKit?.image_style || ''} onChange={e=>setBrandKit({...brandKit, image_style:e.target.value})} placeholder="Image style" />
+                <input value={brandKit?.video_style || ''} onChange={e=>setBrandKit({...brandKit, video_style:e.target.value})} placeholder="Video style" />
+                <button className="security-secondary" onClick={()=>void saveBrandKit()} disabled={businessBusy}>Save Brand Kit</button>
+              </div>}
             </div>
           </section>
         </div>
