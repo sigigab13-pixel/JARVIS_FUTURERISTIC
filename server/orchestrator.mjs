@@ -48,6 +48,31 @@ export function createJarvisOrchestrator({
   const registry = new JarvisToolRegistry();
 
   registry.register({
+    name: 'system.health',
+    description: 'Inspect non-secret configuration and runtime readiness for JARVIS services.',
+    version: '1.0.0',
+    capabilities: ['diagnostics'],
+    requiresAuth: true,
+    requiresApproval: false,
+    inputSchema: { type: 'object' },
+    outputSchema: { type: 'object', required: ['services'] },
+    execute: async (_input, _context) => {
+      const startedAt = new Date().toISOString();
+      const services = {
+        supabase: Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY),
+        ai: Boolean(process.env.HUGGINGFACE_API_TOKEN),
+        redis: Boolean(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN),
+        mediaStorage: Boolean(process.env.R2_ENDPOINT && process.env.R2_ACCESS_KEY_ID && process.env.R2_SECRET_ACCESS_KEY && process.env.R2_BUCKET),
+      };
+      return toolResult('system.health', startedAt, {
+        status: Object.values(services).every(Boolean) ? 'ready' : 'partial',
+        services,
+        checkedAt: new Date().toISOString(),
+      });
+    },
+  });
+
+  registry.register({
     name: 'chat.generate',
     description: 'Generate a JARVIS response through the configured AI provider.',
     version: '1.0.0',
