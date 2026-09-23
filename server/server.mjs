@@ -17,6 +17,9 @@ import {
   saveSemanticMemory,
   getJarvisPreferences,
   updateJarvisPreferences,
+  ensureJarvisEntitlement,
+  getJarvisEntitlement,
+  consumeImageGeneration,
 } from './store.mjs';
 
 const PORT = Number(process.env.PORT || 10000);
@@ -25,6 +28,8 @@ const DIST = path.join(ROOT, 'dist');
 
 const HF_CHAT_URL = 'https://router.huggingface.co/v1/chat/completions';
 const HF_MODEL = process.env.HF_MODEL || 'openai/gpt-oss-120b:fastest';
+const HF_IMAGE_MODEL = process.env.HF_IMAGE_MODEL || 'black-forest-labs/FLUX.1-schnell';
+const HF_IMAGE_EDIT_MODEL = process.env.HF_IMAGE_EDIT_MODEL || 'black-forest-labs/FLUX.2-klein-9B';
 const GOOGLE_TTS_URL = 'https://texttospeech.googleapis.com/v1/text:synthesize';
 const ELEVENLABS_TTS_URL = 'https://api.elevenlabs.io/v1/text-to-speech';
 const ELEVENLABS_VOICES_URL = 'https://api.elevenlabs.io/v2/voices';
@@ -33,6 +38,31 @@ const ELEVENLABS_DEFAULT_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || '';
 const YOUTUBE_CLIENT_ID = process.env.GOOGLE_YOUTUBE_CLIENT_ID || '';
 const YOUTUBE_CLIENT_SECRET = process.env.GOOGLE_YOUTUBE_CLIENT_SECRET || '';
 const PUBLIC_URL = (process.env.PUBLIC_URL || '').replace(/\/$/, '');
+
+async function generateHuggingFaceImage(prompt, model = HF_IMAGE_MODEL, inputImage = null) {
+  const token = process.env.HUGGINGFACE_API_TOKEN || process.env.HF_TOKEN || '';
+  if (!token) throw Object.assign(new Error('Hugging Face image generation is not configured.'), { statusCode: 503 });
+  const { InferenceClient } = await import('@huggingface/inference');
+  const client = new InferenceClient(token);
+  if (inputImage) {
+    const binary = Buffer.from(String(inputImage.data || ''), 'base64');
+    const blob = new Blob([binary], { type: String(inputImage.mimeType || 'image/jpeg') });
+    return client.imageToImage({
+      model,
+      inputs: blob,
+      prompt,
+      provider: 'auto',
+    });
+  }
+  return client.textToImage({ model, inputs: prompt, provider: 'auto' });
+}
+
+async function imageResponse(res, blob) {
+  const buffer = Buffer.from(await blob.arrayBuffer());
+  return json(res, 200, {
+    image: { data: buffer.toString('base64'), mimeType: blob.type || 'image/png' },
+  });
+}
 
 
 function json(res, status, payload, extraHeaders = {}) {
@@ -126,6 +156,12 @@ function safePath(urlPath) {
 export async function handleApi(req, res, pathname, url) {
   if (req.method === 'GET' && pathname === '/api/_healthcheck') {
     return json(res, 200, { message: 'Success', service: 'JARVIS', deployment: 'vercel' });
+  }
+
+  if (req.method === 'GET' && pathname === '/api/plans') {
+    const { jarvisUser } = await requireAuthenticatedJarvisUser(req);
+    const entitlement = await ensureJarvisEntitlement(jarvisUser.id);
+    return json(res, 200, { entitlement });
   }
 
   if (req.method === 'GET' && pathname === '/api/tts/status') {
@@ -389,8 +425,29 @@ export async function handleApi(req, res, pathname, url) {
     }
   }
 
-  if (req.method === 'POST' && pathname === '/api/image/generate') {
-    return json(res, 503, { error: 'Image Lab migration is the next backend step. The JARVIS interface is preserved.' });
+  if (req.method === 'POST' && (pathname === '/api/image/generate' || pathname === '/api/image/edit')) {
+    const { jarvisUser } = await requireAuthenticatedJarvisUser(req);
+    const body = await parseBody(req);
+    const prompt = String(body?.prompt || '').trim();
+    if (!prompt) return json(res, 400, { error: 'An image prompt is required.' });
+    const reference = body?.referenceImage && typeof body.referenceImage === 'object' ? body.referenceImage : null;
+    if (pathname === '/api/image/edit' && !reference?.data) {
+      return json(res, 400, { error: 'A reference image is required for image editing.' });
+    }
+    const entitlement = await getJarvisEntitlement(jarvisUser.id) || await ensureJarvisEntitlement(jarvisUser.id);
+    const remainingBefore = Number(entitlement?.credits_remaining ?? 0);
+    const consumed = await consumeImageGeneration(jarvisUser.id, { prompt: prompt.slice(0, 500), mode: pathname.endsWith('/edit') ? 'edit' : 'generate' });
+    try {
+      const blob = await generateHuggingFaceImage(prompt, pathname.endsWith('/edit') ? HF_IMAGE_EDIT_MODEL : HF_IMAGE_MODEL, pathname.endsWith('/edit') ? reference : null);
+      const buffer = Buffer.from(await blob.arrayBuffer());
+      return json(res, 200, {
+        image: { data: buffer.toString('base64'), mimeType: blob.type || 'image/png' },
+        allowance: { remaining: Number(consumed?.credits_remaining ?? remainingBefore - 1) },
+      }, { 'Set-Cookie': jarvisCookie(jarvisUser.id) });
+    } catch (error) {
+      console.error('JARVIS image generation error:', error);
+      return json(res, 502, { error: error instanceof Error ? error.message : 'Image generation failed.' });
+    }
   }
 
   return json(res, 404, { error: 'API route not found.' });
