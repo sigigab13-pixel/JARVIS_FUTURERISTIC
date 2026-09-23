@@ -128,13 +128,14 @@ async function handleApi(req, res, pathname, url) {
   }
 
   if (req.method === 'GET' && pathname === '/api/youtube/status') {
+    const connection = await getYouTubeConnection();
     return json(res, 200, {
       configured: Boolean(YOUTUBE_CLIENT_ID && YOUTUBE_CLIENT_SECRET && PUBLIC_URL),
-      connected: Boolean(youtubeConnection),
-      channel: youtubeConnection ? {
-        id: youtubeConnection.channelId,
-        title: youtubeConnection.channelTitle,
-        connectedAt: youtubeConnection.connectedAt,
+      connected: Boolean(connection),
+      channel: connection ? {
+        id: connection.channel_id || connection.channelId,
+        title: connection.channel_title || connection.channelTitle,
+        connectedAt: connection.connected_at || connection.connectedAt,
       } : null,
     });
   }
