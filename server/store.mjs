@@ -1,6 +1,8 @@
 const SUPABASE_URL = (process.env.SUPABASE_URL || '').replace(/\/$/, '');
+const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY || '';
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-const configured = Boolean(SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY);
+const SUPABASE_SERVER_KEY = SUPABASE_SECRET_KEY || SUPABASE_SERVICE_ROLE_KEY;
+const configured = Boolean(SUPABASE_URL && SUPABASE_SERVER_KEY);
 
 const memory = {
   oauth: new Map(),
@@ -18,8 +20,7 @@ async function request(pathname, options = {}) {
   const response = await fetch(`${SUPABASE_URL}/rest/v1/${pathname}`, {
     ...options,
     headers: {
-      apikey: SUPABASE_SERVICE_ROLE_KEY,
-      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      apikey: SUPABASE_SERVER_KEY,
       'Content-Type': 'application/json',
       Accept: 'application/json',
       ...(options.headers || {}),
@@ -227,8 +228,7 @@ export async function generateJarvisEmbedding(input) {
   const response = await fetch(EMBEDDING_FUNCTION_URL, {
     method: 'POST',
     headers: {
-      apikey: SUPABASE_SERVICE_ROLE_KEY,
-      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      apikey: SUPABASE_SERVER_KEY,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ input: text.slice(0, 8000) }),
@@ -282,8 +282,7 @@ async function rpc(name, body) {
   const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${name}`, {
     method: 'POST',
     headers: {
-      apikey: SUPABASE_SERVICE_ROLE_KEY,
-      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      apikey: SUPABASE_SERVER_KEY,
       'Content-Type': 'application/json',
       Accept: 'application/json',
     },
