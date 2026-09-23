@@ -36,6 +36,7 @@ import {
   getVideoScenesForUser,
   queueVideoJobForUser,
 } from './store.mjs';
+import { enqueueJob, isRedisConfigured } from './queue.mjs';
 
 const PORT = Number(process.env.PORT || 10000);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -275,8 +276,18 @@ export async function handleApi(req, res, pathname, url) {
         scenes,
         request: body,
       });
+      let dispatch = { queued: false, provider: 'supabase' };
+      if (isRedisConfigured()) {
+        try {
+          dispatch = { queued: true, provider: 'upstash_redis', message: await enqueueJob(job.id, job.type) };
+        } catch (queueError) {
+          console.error('JARVIS Redis dispatch error:', queueError);
+          dispatch = { queued: false, provider: 'supabase', fallback: 'redis_unavailable' };
+        }
+      }
       return json(res, 202, {
         job,
+        dispatch,
         pipeline: ['story_director','character_bible','world_asset_bible','scene_director','storyboard_cost_gate','visual_generation','motion','voice_audio','lip_sync','editing','subtitles','continuity_brand_qa','repair_recovery','render','final_qa','publish'],
       });
     }
