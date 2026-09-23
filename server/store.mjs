@@ -208,20 +208,17 @@ export async function saveSemanticMemory(userId, content, metadata = {}, memoryT
   if (!text) return null;
   const embedding = await generateJarvisEmbedding(text);
   if (!embedding) return null;
-  const rows = await request('jarvis_semantic_memory?on_conflict=user_id,content_hash', {
-    method: 'POST',
-    headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
-    body: JSON.stringify({
-      user_id: userId,
-      memory_type: memoryType,
-      content: text.slice(0, 8000),
-      metadata,
-      embedding,
-      importance: Number(metadata.importance ?? 0.6),
-      last_accessed_at: new Date().toISOString(),
-    }),
+
+  const rows = await rpc('upsert_jarvis_semantic_memory', {
+    p_user_id: userId,
+    p_content: text.slice(0, 8000),
+    p_embedding: embedding,
+    p_memory_type: memoryType,
+    p_metadata: metadata,
+    p_importance: Number(metadata.importance ?? 0.6),
+    p_dedupe_threshold: 0.97,
   });
-  return rows?.[0] || null;
+  return Array.isArray(rows) ? rows[0] || null : rows || null;
 }
 
 async function rpc(name, body) {
