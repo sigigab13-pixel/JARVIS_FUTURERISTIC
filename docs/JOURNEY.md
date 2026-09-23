@@ -58,7 +58,65 @@ The next engineering work will continue turning these foundations into productio
 - publishing
 - analytics
 
-The journey will continue to be documented here as the system evolves.
+---
+
+## Entry 002 — Building the JARVIS orchestration engine
+
+**Status:** Implemented and tested on the development branch
+
+The next major step was turning JARVIS from a collection of capabilities into an orchestrated system.
+
+### What we built
+
+JARVIS now has a central tool registry and execution layer for core capabilities including:
+
+- system health checks
+- persistent memory search
+- image generation
+- video planning
+- chat generation
+
+The `/api/jarvis` route acts as the orchestration entry point while preserving the existing capability routes.
+
+### Autonomous planning
+
+JARVIS can now build a validated execution plan for supported requests.
+
+For example, a memory-aware request can be planned as:
+
+1. search persistent memory
+2. pass the relevant memory into chat generation
+
+Explicit image and video requests are routed to their corresponding tools.
+
+Plans are validated before execution, tool names are checked against the registry, execution results are verified, and retryable failures can be retried within bounded limits.
+
+The execution engine also limits plan length so an unexpected request cannot create an unbounded chain of actions.
+
+### Important fix
+
+During testing, nested references to previous tool results were not being resolved correctly.
+
+That was fixed so references such as nested previous outputs can now be resolved during plan execution.
+
+### Verification
+
+The development test suite currently passes all 6 orchestration tests, including:
+
+- core tool registration
+- image routing
+- video project validation
+- successful tool execution verification
+- memory-to-chat autonomous planning
+- rejection of unregistered tools
+
+### What remains
+
+The orchestration layer is still being expanded. The next infrastructure work is to connect queued jobs to durable workers, persist execution state, improve recovery, and continue integrating the multi-cloud services.
+
+### Next milestone
+
+**Phase 1D — Redis queue → durable worker → Supabase execution state.**
 
 ---
 
