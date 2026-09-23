@@ -391,3 +391,90 @@ export async function consumeImageGeneration(userId, metadata = {}) {
 
   return { ...entitlement, credits_remaining: nextRemaining };
 }
+
+
+export async function getBusinessForUser(userId) {
+  if (!validUuid(userId)) throw new Error('Invalid JARVIS user id.');
+  if (!configured) return null;
+  const rows = await request('jarvis_businesses?select=*&user_id=eq.' + encodeURIComponent(userId) + '&order=created_at.asc&limit=1');
+  return rows?.[0] || null;
+}
+
+export async function createBusinessForUser(userId, data = {}) {
+  if (!validUuid(userId)) throw new Error('Invalid JARVIS user id.');
+  const business = {
+    user_id: userId,
+    name: String(data.name || 'My Business').trim().slice(0, 200),
+    description: String(data.description || '').trim().slice(0, 2000) || null,
+    industry: String(data.industry || '').trim().slice(0, 200) || null,
+    website: String(data.website || '').trim().slice(0, 500) || null,
+  };
+  if (!configured) return { id: crypto.randomUUID(), ...business };
+  const rows = await request('jarvis_businesses', {
+    method: 'POST',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify(business),
+  });
+  return rows?.[0] || null;
+}
+
+export async function updateBusinessForUser(userId, businessId, data = {}) {
+  if (!validUuid(userId) || !validUuid(businessId)) throw new Error('Invalid business identity.');
+  if (!configured) return { id: businessId, ...data };
+  const payload = {};
+  for (const key of ['name','description','industry','website','status']) {
+    if (data[key] !== undefined) payload[key] = String(data[key] || '').trim().slice(0, 2000);
+  }
+  payload.updated_at = new Date().toISOString();
+  const rows = await request('jarvis_businesses?id=eq.' + encodeURIComponent(businessId) + '&user_id=eq.' + encodeURIComponent(userId), {
+    method: 'PATCH',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify(payload),
+  });
+  return rows?.[0] || null;
+}
+
+export async function getBrandKitForUser(userId, businessId) {
+  if (!validUuid(userId) || !validUuid(businessId)) throw new Error('Invalid business identity.');
+  if (!configured) return null;
+  const rows = await request('jarvis_brand_kits?select=*&business_id=eq.' + encodeURIComponent(businessId) + '&limit=1');
+  return rows?.[0] || null;
+}
+
+export async function upsertBrandKitForUser(userId, businessId, data = {}) {
+  if (!validUuid(userId) || !validUuid(businessId)) throw new Error('Invalid business identity.');
+  if (!configured) return { business_id: businessId, ...data };
+  const payload = {
+    business_id: businessId,
+    logo_url: String(data.logo_url || '').trim().slice(0, 1000) || null,
+    colors: data.colors && typeof data.colors === 'object' ? data.colors : {},
+    fonts: data.fonts && typeof data.fonts === 'object' ? data.fonts : {},
+    visual_style: String(data.visual_style || '').trim().slice(0, 500) || null,
+    brand_voice: String(data.brand_voice || '').trim().slice(0, 1000) || null,
+    business_description: String(data.business_description || '').trim().slice(0, 2000) || null,
+    products_services: Array.isArray(data.products_services) ? data.products_services : [],
+    social_handles: data.social_handles && typeof data.social_handles === 'object' ? data.social_handles : {},
+    image_style: String(data.image_style || '').trim().slice(0, 500) || null,
+    video_style: String(data.video_style || '').trim().slice(0, 500) || null,
+    intro_outro: data.intro_outro && typeof data.intro_outro === 'object' ? data.intro_outro : {},
+    character_bible: data.character_bible && typeof data.character_bible === 'object' ? data.character_bible : {},
+    updated_at: new Date().toISOString(),
+  };
+  const rows = await request('jarvis_brand_kits?business_id=eq.' + encodeURIComponent(businessId), {
+    method: 'GET',
+  });
+  if (rows?.[0]?.id) {
+    const updated = await request('jarvis_brand_kits?id=eq.' + encodeURIComponent(rows[0].id), {
+      method: 'PATCH',
+      headers: { Prefer: 'return=representation' },
+      body: JSON.stringify(payload),
+    });
+    return updated?.[0] || null;
+  }
+  const created = await request('jarvis_brand_kits', {
+    method: 'POST',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify(payload),
+  });
+  return created?.[0] || null;
+}
