@@ -29,8 +29,10 @@ import {
   getVideoProjectsForUser,
   getVideoProjectForUser,
   addVideoCharacterForUser,
+  updateVideoCharacterForUser,
   getVideoCharactersForUser,
   addVideoSceneForUser,
+  updateVideoSceneForUser,
   getVideoScenesForUser,
   queueVideoJobForUser,
 } from './store.mjs';
