@@ -436,9 +436,9 @@ export async function handleApi(req, res, pathname, url) {
     }
     const entitlement = await getJarvisEntitlement(jarvisUser.id) || await ensureJarvisEntitlement(jarvisUser.id);
     const remainingBefore = Number(entitlement?.credits_remaining ?? 0);
-    const consumed = await consumeImageGeneration(jarvisUser.id, { prompt: prompt.slice(0, 500), mode: pathname.endsWith('/edit') ? 'edit' : 'generate' });
     try {
       const blob = await generateHuggingFaceImage(prompt, pathname.endsWith('/edit') ? HF_IMAGE_EDIT_MODEL : HF_IMAGE_MODEL, pathname.endsWith('/edit') ? reference : null);
+      const consumed = await consumeImageGeneration(jarvisUser.id, { prompt: prompt.slice(0, 500), mode: pathname.endsWith('/edit') ? 'edit' : 'generate' });
       const buffer = Buffer.from(await blob.arrayBuffer());
       return json(res, 200, {
         image: { data: buffer.toString('base64'), mimeType: blob.type || 'image/png' },
