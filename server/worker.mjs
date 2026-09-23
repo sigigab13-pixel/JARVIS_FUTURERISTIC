@@ -149,7 +149,8 @@ export async function runWorker({ workerId = createWorkerId(), once = false, pol
 }
 
 if (process.argv[1] && process.argv[1].endsWith('/worker.mjs')) {
-  runWorker().catch(error => {
+  const once = process.env.JARVIS_WORKER_ONCE === '1' || process.env.JARVIS_WORKER_ONCE === 'true';
+  runWorker({ once }).catch(error => {
     console.error('[JARVIS worker] fatal:', error);
     process.exitCode = 1;
   });
