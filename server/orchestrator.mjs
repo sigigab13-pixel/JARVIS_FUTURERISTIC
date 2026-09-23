@@ -334,6 +334,7 @@ export function createJarvisOrchestrator({
 
   return {
     registry,
+    executePlan,
 
     async run({
       message,
