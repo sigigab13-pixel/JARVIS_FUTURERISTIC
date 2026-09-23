@@ -1,6 +1,18 @@
+async function authHeaders(extra: Record<string, string> = {}): Promise<Record<string, string>> {
+  const { supabase } = await import('./supabase');
+  const { data } = await supabase.auth.getSession();
+  return {
+    Accept: 'application/json',
+    ...extra,
+    ...(data.session?.access_token
+      ? { Authorization: `Bearer ${data.session.access_token}` }
+      : {}),
+  };
+}
+
 export const api = {
   get: async (path: string) => {
-    const response = await fetch(path, { headers: { Accept: 'application/json' } });
+    const response = await fetch(path, { headers: await authHeaders() });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw Object.assign(new Error(data?.error || `Request failed with status ${response.status}`), { response: { data } });
     return { data };
@@ -8,7 +20,7 @@ export const api = {
   post: async (path: string, body: unknown) => {
     const response = await fetch(path, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      headers: await authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
     });
     const data = await response.json().catch(() => ({}));
