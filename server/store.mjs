@@ -210,7 +210,7 @@ export async function saveSemanticMemory(userId, content, metadata = {}, memoryT
   if (!embedding) return null;
   const rows = await request('jarvis_semantic_memory', {
     method: 'POST',
-    headers: { Prefer: 'return=representation' },
+    headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
     body: JSON.stringify({
       user_id: userId,
       memory_type: memoryType,
