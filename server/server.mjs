@@ -234,6 +234,12 @@ export async function handleApi(req, res, pathname, url) {
       }
     }
 
+    const characterEditMatch = pathname.match(/^\/api\/video\/projects\/([0-9a-f-]{36})\/characters\/([0-9a-f-]{36})$/i);
+    if (req.method === 'PATCH' && characterEditMatch) {
+      const body = await parseBody(req);
+      return json(res, 200, { character: await updateVideoCharacterForUser(jarvisUser.id, characterEditMatch[1], characterEditMatch[2], body) });
+    }
+
     const scenesMatch = pathname.match(/^\/api\/video\/projects\/([0-9a-f-]{36})\/scenes$/i);
     if (scenesMatch) {
       const projectId = scenesMatch[1];
@@ -242,6 +248,12 @@ export async function handleApi(req, res, pathname, url) {
         const body = await parseBody(req);
         return json(res, 201, { scene: await addVideoSceneForUser(jarvisUser.id, projectId, body) });
       }
+    }
+
+    const sceneEditMatch = pathname.match(/^\/api\/video\/projects\/([0-9a-f-]{36})\/scenes\/([0-9a-f-]{36})$/i);
+    if (req.method === 'PATCH' && sceneEditMatch) {
+      const body = await parseBody(req);
+      return json(res, 200, { scene: await updateVideoSceneForUser(jarvisUser.id, sceneEditMatch[1], sceneEditMatch[2], body) });
     }
 
     const planMatch = pathname.match(/^\/api\/video\/projects\/([0-9a-f-]{36})\/plan$/i);
