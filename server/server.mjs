@@ -482,7 +482,15 @@ export async function handleApi(req, res, pathname, url) {
       },
     });
 
-    const result = await orchestrator.run({ message, messages });
+    const result = await orchestrator.run({
+      message,
+      messages,
+      action: String(input.action || 'auto'),
+      imagePrompt: String(input.imagePrompt || '').trim() || undefined,
+      referenceImage: input.referenceImage || undefined,
+      videoProjectId: String(input.videoProjectId || '').trim() || undefined,
+      videoRequest: input.videoRequest && typeof input.videoRequest === 'object' ? input.videoRequest : {},
+    });
     if (!result.success) return json(res, 502, result);
 
     const responseText = String(result.response?.text || '').trim();
