@@ -641,7 +641,9 @@ function App() {
         </section>
       </section>
 
-      {capabilityOpen && <CapabilityCenter onClose={() => setCapabilityOpen(false)} />}\n\n      {empireOpen && createPortal((
+      {capabilityOpen && <CapabilityCenter onClose={() => setCapabilityOpen(false)} />}
+
+      {empireOpen && createPortal((
         <div className="empire-overlay" role="dialog" aria-modal="true" aria-label="JARVIS Empire Command">
           <section className="empire-panel">
             <div className="security-head">
