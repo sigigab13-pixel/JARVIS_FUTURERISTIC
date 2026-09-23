@@ -194,11 +194,15 @@ export async function searchSemanticMemories(userId, input, options = {}) {
   if (!embedding) return [];
   const threshold = Number(options.threshold ?? 0.72);
   const count = Math.min(12, Math.max(1, Number(options.count) || 8));
+  const memoryTypes = Array.isArray(options.memoryTypes) && options.memoryTypes.length
+    ? options.memoryTypes.map(String)
+    : null;
   return await rpc('match_jarvis_memories', {
     query_embedding: embedding,
     match_threshold: threshold,
     match_count: count,
     filter_user_id: userId,
+    filter_memory_types: memoryTypes,
   });
 }
 
