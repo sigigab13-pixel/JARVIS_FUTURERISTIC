@@ -117,9 +117,9 @@ function safePath(urlPath) {
   return target.startsWith(DIST) ? target : null;
 }
 
-async function handleApi(req, res, pathname, url) {
+export async function handleApi(req, res, pathname, url) {
   if (req.method === 'GET' && pathname === '/api/_healthcheck') {
-    return json(res, 200, { message: 'Success', service: 'JARVIS', deployment: 'render' });
+    return json(res, 200, { message: 'Success', service: 'JARVIS', deployment: 'vercel' });
   }
 
   if (req.method === 'GET' && pathname === '/api/tts/status') {
@@ -380,6 +380,8 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`JARVIS listening on port ${PORT}`);
-});
+if (process.env.VERCEL !== '1') {
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`JARVIS listening on port ${PORT}`);
+  });
+}
