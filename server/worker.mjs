@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { dequeueJob, isRedisConfigured } from './queue.mjs';
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || '').replace(/\/$/, '');
 const SUPABASE_SERVER_KEY = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
@@ -30,6 +31,12 @@ export function createWorkerId(prefix = 'jarvis-worker') {
 
 export async function claimNextJob(workerId) {
   const rows = await rpc('worker_claim_next_job', { p_worker_id: workerId });
+  return Array.isArray(rows) ? rows[0] || null : rows || null;
+}
+
+export async function claimJob(jobId, workerId) {
+  if (!jobId) return null;
+  const rows = await rpc('worker_claim_job', { p_job_id: jobId, p_worker_id: workerId });
   return Array.isArray(rows) ? rows[0] || null : rows || null;
 }
 
@@ -95,7 +102,10 @@ export async function runWorker({ workerId = createWorkerId(), once = false, pol
   while (true) {
     let job;
     try {
-      job = await claimNextJob(workerId);
+      const queued = isRedisConfigured() ? await dequeueJob() : null;
+      job = queued?.jobId ? await claimJob(queued.jobId, workerId) : await claimNextJob(workerId);
+      // If a stale/duplicate Redis message was consumed, recover any other queued Supabase job.
+      if (!job && queued?.jobId) job = await claimNextJob(workerId);
     } catch (error) {
       logger.error?.('[JARVIS worker] claim failed:', error);
       if (once) throw error;
