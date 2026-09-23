@@ -551,7 +551,7 @@ export async function updateVideoCharacterForUser(userId, projectId, characterId
     if (data[key] !== undefined) payload[key] = data[key] && typeof data[key] === 'object' ? data[key] : {};
   }
   if (data.reference_assets !== undefined) payload.reference_assets = Array.isArray(data.reference_assets) ? data.reference_assets : [];
-  payload.version = 'version + 1';
+  payload.version = Number(data.version || 1) + 1;
   payload.updated_at = new Date().toISOString();
   const rows = await request('jarvis_video_characters?id=eq.' + encodeURIComponent(characterId) + '&project_id=eq.' + encodeURIComponent(projectId), {
     method: 'PATCH',
