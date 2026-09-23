@@ -478,3 +478,123 @@ export async function upsertBrandKitForUser(userId, businessId, data = {}) {
   });
   return created?.[0] || null;
 }
+
+
+export async function createVideoProjectForUser(userId, data = {}) {
+  if (!validUuid(userId)) throw new Error('Invalid JARVIS user id.');
+  const project = {
+    user_id: userId,
+    business_id: validUuid(data.business_id) ? data.business_id : null,
+    title: String(data.title || 'Untitled JARVIS Video').trim().slice(0, 200),
+    description: String(data.description || '').trim().slice(0, 4000) || null,
+    format: ['16:9', '9:16', '1:1'].includes(String(data.format)) ? String(data.format) : '16:9',
+    status: 'draft',
+    story_bible: data.story_bible && typeof data.story_bible === 'object' ? data.story_bible : {},
+    settings: data.settings && typeof data.settings === 'object' ? data.settings : {},
+  };
+  if (!configured) return { id: crypto.randomUUID(), ...project };
+  const rows = await request('jarvis_video_projects', {
+    method: 'POST',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify(project),
+  });
+  return rows?.[0] || null;
+}
+
+export async function getVideoProjectsForUser(userId) {
+  if (!validUuid(userId)) throw new Error('Invalid JARVIS user id.');
+  if (!configured) return [];
+  return await request('jarvis_video_projects?select=*&user_id=eq.' + encodeURIComponent(userId) + '&order=updated_at.desc&limit=50');
+}
+
+export async function getVideoProjectForUser(userId, projectId) {
+  if (!validUuid(userId) || !validUuid(projectId)) throw new Error('Invalid video project identity.');
+  if (!configured) return null;
+  const rows = await request('jarvis_video_projects?select=*&id=eq.' + encodeURIComponent(projectId) + '&user_id=eq.' + encodeURIComponent(userId) + '&limit=1');
+  return rows?.[0] || null;
+}
+
+export async function addVideoCharacterForUser(userId, projectId, data = {}) {
+  const project = await getVideoProjectForUser(userId, projectId);
+  if (!project) throw Object.assign(new Error('Video project not found.'), { statusCode: 404 });
+  const character = {
+    project_id: projectId,
+    name: String(data.name || 'Unnamed Character').trim().slice(0, 200),
+    role: String(data.role || '').trim().slice(0, 200) || null,
+    profile: data.profile && typeof data.profile === 'object' ? data.profile : {},
+    appearance: data.appearance && typeof data.appearance === 'object' ? data.appearance : {},
+    voice: data.voice && typeof data.voice === 'object' ? data.voice : {},
+    wardrobe: data.wardrobe && typeof data.wardrobe === 'object' ? data.wardrobe : {},
+    relationships: data.relationships && typeof data.relationships === 'object' ? data.relationships : {},
+    reference_assets: Array.isArray(data.reference_assets) ? data.reference_assets : [],
+    continuity_rules: data.continuity_rules && typeof data.continuity_rules === 'object' ? data.continuity_rules : {},
+  };
+  if (!configured) return { id: crypto.randomUUID(), ...character };
+  const rows = await request('jarvis_video_characters', {
+    method: 'POST',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify(character),
+  });
+  return rows?.[0] || null;
+}
+
+export async function getVideoCharactersForUser(userId, projectId) {
+  const project = await getVideoProjectForUser(userId, projectId);
+  if (!project) throw Object.assign(new Error('Video project not found.'), { statusCode: 404 });
+  if (!configured) return [];
+  return await request('jarvis_video_characters?select=*&project_id=eq.' + encodeURIComponent(projectId) + '&order=created_at.asc');
+}
+
+export async function addVideoSceneForUser(userId, projectId, data = {}) {
+  const project = await getVideoProjectForUser(userId, projectId);
+  if (!project) throw Object.assign(new Error('Video project not found.'), { statusCode: 404 });
+  const scene = {
+    project_id: projectId,
+    scene_number: Math.max(1, Number(data.scene_number) || 1),
+    title: String(data.title || '').trim().slice(0, 200) || null,
+    script: String(data.script || '').trim().slice(0, 12000) || null,
+    dialogue: Array.isArray(data.dialogue) ? data.dialogue : [],
+    characters: Array.isArray(data.characters) ? data.characters : [],
+    visual_plan: data.visual_plan && typeof data.visual_plan === 'object' ? data.visual_plan : {},
+    camera_plan: data.camera_plan && typeof data.camera_plan === 'object' ? data.camera_plan : {},
+    audio_plan: data.audio_plan && typeof data.audio_plan === 'object' ? data.audio_plan : {},
+    lip_sync_plan: data.lip_sync_plan && typeof data.lip_sync_plan === 'object' ? data.lip_sync_plan : {},
+    continuity_notes: data.continuity_notes && typeof data.continuity_notes === 'object' ? data.continuity_notes : {},
+  };
+  if (!configured) return { id: crypto.randomUUID(), ...scene };
+  const rows = await request('jarvis_video_scenes', {
+    method: 'POST',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify(scene),
+  });
+  return rows?.[0] || null;
+}
+
+export async function getVideoScenesForUser(userId, projectId) {
+  const project = await getVideoProjectForUser(userId, projectId);
+  if (!project) throw Object.assign(new Error('Video project not found.'), { statusCode: 404 });
+  if (!configured) return [];
+  return await request('jarvis_video_scenes?select=*&project_id=eq.' + encodeURIComponent(projectId) + '&order=scene_number.asc,version.asc');
+}
+
+export async function queueVideoJobForUser(userId, projectId, payload = {}) {
+  const project = await getVideoProjectForUser(userId, projectId);
+  if (!project) throw Object.assign(new Error('Video project not found.'), { statusCode: 404 });
+  const jobPayload = { project_id: projectId, pipeline: 'jarvis_video_engine', ...payload };
+  if (!configured) return { id: crypto.randomUUID(), user_id: userId, type: 'video_pipeline', status: 'queued', payload: jobPayload };
+  const rows = await request('jobs', {
+    method: 'POST',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify({
+      user_id: userId,
+      type: 'video_pipeline',
+      status: 'queued',
+      priority: Number(payload.priority || 5),
+      payload: jobPayload,
+      attempts: 0,
+      max_attempts: 3,
+      scheduled_at: new Date().toISOString(),
+    }),
+  });
+  return rows?.[0] || null;
+}
