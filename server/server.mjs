@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import crypto from 'node:crypto';
+import { createJarvisOrchestrator } from './orchestrator.mjs';
 import {
   ensureJarvisUser,
   getConversationMessages,
@@ -388,6 +389,131 @@ export async function handleApi(req, res, pathname, url) {
     if (!response.ok || !user?.id) return json(res, 401, { error: 'Your JARVIS session is invalid or expired.' });
     const jarvisUser = await ensureJarvisAuthUser(user);
     return json(res, 200, { ok: true, user: { id: jarvisUser.id, name: jarvisUser.name, email: jarvisUser.email || user.email || null } }, { 'Set-Cookie': jarvisCookie(jarvisUser.id) });
+  }
+
+  if (req.method === 'GET' && pathname === '/api/jarvis/tools') {
+    const { jarvisUser } = await requireAuthenticatedJarvisUser(req);
+    const token = process.env.HUGGINGFACE_API_TOKEN;
+    if (!token) return json(res, 503, { error: 'JARVIS AI is not configured.' });
+
+    const orchestrator = createJarvisOrchestrator({
+      userId: jarvisUser.id,
+      preferences: await getJarvisPreferences(jarvisUser.id),
+      hfToken: token,
+      model: HF_MODEL,
+      capabilities: {
+        searchMemory: (query, options) => searchSemanticMemories(jarvisUser.id, query, options),
+      },
+    });
+
+    return json(res, 200, {
+      userId: jarvisUser.id,
+      tools: orchestrator.registry.list(),
+    }, { 'Set-Cookie': jarvisCookie(jarvisUser.id) });
+  }
+
+  if (req.method === 'POST' && pathname === '/api/jarvis') {
+    const input = await parseBody(req);
+    const messages = Array.isArray(input.messages)
+      ? input.messages.filter(m => ['user', 'assistant', 'system', 'model'].includes(String(m?.role)) && String(m?.content || '').trim()).slice(-16)
+      : [];
+    const message = String(input.message || messages[messages.length - 1]?.content || '').trim();
+    if (!message) return json(res, 400, { error: 'A message is required.' });
+
+    const { jarvisUser } = await requireAuthenticatedJarvisUser(req);
+    const token = process.env.HUGGINGFACE_API_TOKEN;
+    if (!token) return json(res, 503, { error: 'Hugging Face AI is not configured on this deployment.' });
+
+    let semanticMemories = [];
+    try {
+      semanticMemories = await searchSemanticMemories(jarvisUser.id, message, { threshold: 0.72, count: 8 });
+    } catch (memoryError) {
+      console.error('JARVIS orchestrator memory retrieval error:', memoryError);
+    }
+
+    const preferences = await getJarvisPreferences(jarvisUser.id);
+    const orchestrator = createJarvisOrchestrator({
+      userId: jarvisUser.id,
+      memories: semanticMemories,
+      preferences,
+      hfToken: token,
+      model: HF_MODEL,
+      capabilities: {
+        searchMemory: (query, options) => searchSemanticMemories(jarvisUser.id, query, options),
+        generateImage: async ({ prompt: imagePrompt, referenceImage }) => {
+          const entitlement = await getJarvisEntitlement(jarvisUser.id) || await ensureJarvisEntitlement(jarvisUser.id);
+          const remainingBefore = Number(entitlement?.credits_remaining ?? 0);
+          const blob = await generateHuggingFaceImage(
+            imagePrompt,
+            referenceImage ? HF_IMAGE_EDIT_MODEL : HF_IMAGE_MODEL,
+            referenceImage || null,
+          );
+          const consumed = await consumeImageGeneration(jarvisUser.id, {
+            prompt: imagePrompt.slice(0, 500),
+            mode: referenceImage ? 'edit' : 'generate',
+          });
+          const buffer = Buffer.from(await blob.arrayBuffer());
+          return {
+            image: { data: buffer.toString('base64'), mimeType: blob.type || 'image/png' },
+            allowance: { remaining: Number(consumed?.credits_remaining ?? remainingBefore - 1) },
+          };
+        },
+        planVideo: async (projectId, request) => {
+          const project = await getVideoProjectForUser(jarvisUser.id, projectId);
+          if (!project) throw new Error('Video project not found.');
+          const [characters, scenes] = await Promise.all([
+            getVideoCharactersForUser(jarvisUser.id, projectId),
+            getVideoScenesForUser(jarvisUser.id, projectId),
+          ]);
+          const job = await queueVideoJobForUser(jarvisUser.id, projectId, {
+            operation: 'plan',
+            format: project.format,
+            title: project.title,
+            story_bible: project.story_bible,
+            characters,
+            scenes,
+            request,
+          });
+          return {
+            job,
+            pipeline: ['story_director','character_bible','world_asset_bible','scene_director','storyboard_cost_gate','visual_generation','motion','voice_audio','lip_sync','editing','subtitles','continuity_brand_qa','repair_recovery','render','final_qa','publish'],
+          };
+        },
+      },
+    });
+
+    const result = await orchestrator.run({
+      message,
+      messages,
+      action: String(input.action || 'auto'),
+      imagePrompt: String(input.imagePrompt || '').trim() || undefined,
+      referenceImage: input.referenceImage || undefined,
+      videoProjectId: String(input.videoProjectId || '').trim() || undefined,
+      videoRequest: input.videoRequest && typeof input.videoRequest === 'object' ? input.videoRequest : {},
+    });
+    if (!result.success) return json(res, 502, result);
+
+    const responseText = String(result.response?.text || '').trim();
+    const shouldRemember = /\b(remember|don't forget|do not forget|keep in mind|i prefer|i like|my favorite|i want|my goal|i plan to|i am building|i'm building|we decided|from now on|call me)\b/i.test(message)
+      && message.length >= 12;
+
+    if (shouldRemember) {
+      try {
+        await saveSemanticMemory(jarvisUser.id, message, {
+          source: 'orchestrator',
+          importance: /\b(remember|don't forget|do not forget|from now on|call me)\b/i.test(message) ? 0.9 : 0.7,
+        }, 'chat_memory');
+      } catch (memoryError) {
+        console.error('JARVIS orchestrator memory save error:', memoryError);
+      }
+    }
+
+    await appendConversationMessages(jarvisUser.id, [
+      { role: 'user', content: message },
+      { role: 'assistant', content: responseText },
+    ]);
+
+    return json(res, 200, { ...result, conversationId: jarvisUser.id, persistent: true }, { 'Set-Cookie': jarvisCookie(jarvisUser.id) });
   }
 
   if (req.method === 'GET' && pathname === '/api/chat/history') {
