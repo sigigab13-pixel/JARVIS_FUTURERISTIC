@@ -61,3 +61,24 @@ test('explicit video action requires a project id instead of silently chatting',
     /video project id is required/i,
   );
 });
+
+
+test('execution engine verifies successful tool execution', async () => {
+  const orchestrator = createJarvisOrchestrator({
+    userId: 'test-user',
+    hfToken: 'test-token',
+    model: 'test-model',
+    capabilities: {
+      generateImage: async ({ prompt }) => ({ image: { data: prompt, mimeType: 'image/png' } }),
+    },
+  });
+
+  const result = await orchestrator.run({
+    message: 'create an image of a JARVIS core',
+    action: 'image',
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.execution.verified, true);
+  assert.equal(result.execution.results[0].verification.ok, true);
+});
