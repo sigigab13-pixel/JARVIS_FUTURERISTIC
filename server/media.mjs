@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 
 const accountId = String(process.env.R2_ACCOUNT_ID || '').trim();
