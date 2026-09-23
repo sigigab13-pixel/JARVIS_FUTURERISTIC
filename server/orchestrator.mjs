@@ -154,8 +154,9 @@ export function createJarvisOrchestrator({
     execute: async (input) => {
       const startedAt = new Date().toISOString();
       try {
-        const memoryContext = memories.length
-          ? `Relevant long-term memories for this user, ranked by relevance and importance:\n${memories.map((m, i) => `${i + 1}. [${String(m.memory_type || 'memory')}] ${String(m.content || '').trim()}`).join('\n')}\nUse only memories that genuinely help answer the current request. Do not mention the memory system unless asked.`
+        const selectedMemories = Array.isArray(input?.memoryOverride) ? input.memoryOverride : memories;
+        const memoryContext = selectedMemories.length
+          ? `Relevant long-term memories for this user, ranked by relevance and importance:\n${selectedMemories.map((m, i) => `${i + 1}. [${String(m.memory_type || 'memory')}] ${String(m.content || '').trim()}`).join('\n')}\nUse only memories that genuinely help answer the current request. Do not mention the memory system unless asked.`
           : '';
 
         const identity = preferences?.name ? `The user's preferred name is ${String(preferences.name)}.\n` : '';
@@ -211,19 +212,124 @@ export function createJarvisOrchestrator({
     return { ok: true };
   }
 
+  function resolvePrevious(value, previousResult) {
+    if (value === '$previous') return previousResult;
+    if (Array.isArray(value)) return value.map(item => resolvePrevious(item, previousResult));
+    if (!value || typeof value !== 'object') return value;
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, resolvePrevious(item, previousResult)]));
+  }
+
   async function executePlan(steps, context = {}) {
     if (!Array.isArray(steps) || steps.length === 0) throw Object.assign(new Error('Execution plan must contain at least one step.'), { statusCode: 400 });
     if (steps.length > 8) throw Object.assign(new Error('Execution plan is limited to 8 steps.'), { statusCode: 400 });
     const results = [];
+    let previousResult;
     for (const step of steps) {
       const toolName = String(step?.tool || '').trim();
       if (!toolName) throw new Error('Every execution step requires a tool.');
-      const result = await executeTool(toolName, step?.input || {}, context, { retries: step?.retries ?? 1 });
+      const tool = registry.get(toolName);
+      if (!tool) throw Object.assign(new Error(`Planner selected an unregistered tool: ${toolName}`), { statusCode: 400 });
+      if (tool.requiresApproval && step?.approved !== true) {
+        results.push({
+          success: false,
+          tool: toolName,
+          executionId: crypto.randomUUID(),
+          error: { code: 'APPROVAL_REQUIRED', message: `Approval is required before running ${toolName}.`, retryable: false },
+          verification: { ok: false, reason: 'Approval required.' },
+        });
+        break;
+      }
+      const input = resolvePrevious(step?.input || {}, previousResult);
+      const result = await executeTool(toolName, input, context, { retries: step?.retries ?? 1 });
       const verification = verifyResult(result);
       results.push({ ...result, verification });
+      previousResult = result;
       if (!verification.ok && step?.continueOnError !== true) break;
     }
     return results;
+  }
+
+  function buildPlan({ latestMessage, normalizedMessages, action, imagePrompt, referenceImage, videoProjectId, videoRequest }) {
+    const lower = latestMessage.toLowerCase();
+    const requestedAction = String(action || 'auto').toLowerCase();
+    const wantsImage = requestedAction === 'image'
+      || (requestedAction === 'auto' && /\b(generate|create|make|draw)\b.{0,30}\b(image|picture|photo|artwork|logo)\b/i.test(lower));
+    const wantsVideo = requestedAction === 'video'
+      || (requestedAction === 'auto' && /\b(plan|create|make|generate)\b.{0,30}\b(video|film|short|episode)\b/i.test(lower));
+    const wantsMemory = /\b(remember|recall|what do you know|what do you remember|find.*memory|search.*memory)\b/i.test(lower);
+
+    if (wantsImage) {
+      return {
+        intent: 'image_generation',
+        summary: 'Generate the requested image through the registered image capability.',
+        requiresApproval: false,
+        steps: [{
+          id: 'step_image_generate',
+          tool: 'image.generate',
+          purpose: 'Generate the requested image.',
+          input: { prompt: String(imagePrompt || latestMessage).trim(), referenceImage },
+          requiresApproval: false,
+          retries: 1,
+        }],
+      };
+    }
+
+    if (wantsVideo) {
+      if (!videoProjectId) throw Object.assign(new Error('A video project id is required for video planning.'), { statusCode: 400 });
+      return {
+        intent: 'video_planning',
+        summary: 'Plan the requested video through the registered video capability.',
+        requiresApproval: false,
+        steps: [{
+          id: 'step_video_plan',
+          tool: 'video.plan',
+          purpose: 'Create the video planning job.',
+          input: { projectId: videoProjectId, request: videoRequest },
+          requiresApproval: false,
+          retries: 1,
+        }],
+      };
+    }
+
+    if (wantsMemory && typeof capabilities.searchMemory === 'function') {
+      return {
+        intent: 'memory_augmented_conversation',
+        summary: 'Search long-term memory first, then use the verified results to answer the user.',
+        requiresApproval: false,
+        steps: [
+          {
+            id: 'step_memory_search',
+            tool: 'memory.search',
+            purpose: 'Retrieve relevant long-term memories.',
+            input: { query: latestMessage, count: 8 },
+            requiresApproval: false,
+            retries: 1,
+          },
+          {
+            id: 'step_chat_generate',
+            tool: 'chat.generate',
+            purpose: 'Answer using the verified memory search result.',
+            input: { messages: normalizedMessages, memoryOverride: '$previous.data.memories' },
+            requiresApproval: false,
+            retries: 1,
+          },
+        ],
+      };
+    }
+
+    return {
+      intent: 'conversation',
+      summary: 'Answer the user through the central JARVIS tool registry.',
+      requiresApproval: false,
+      steps: [{
+        id: 'step_chat_generate',
+        tool: 'chat.generate',
+        purpose: 'Generate the assistant response.',
+        input: { messages: normalizedMessages },
+        requiresApproval: false,
+        retries: 1,
+      }],
+    };
   }
 
   return {
@@ -246,70 +352,34 @@ export function createJarvisOrchestrator({
         .slice(-16)
         .map(item => ({ role: item.role, content: String(item.content).trim() }));
 
-      const lower = latestMessage.toLowerCase();
-      const requestedAction = String(action || 'auto').toLowerCase();
-      const wantsImage = requestedAction === 'image'
-        || (requestedAction === 'auto' && /\b(generate|create|make|draw)\b.{0,30}\b(image|picture|photo|artwork|logo)\b/i.test(lower));
-      const wantsVideo = requestedAction === 'video'
-        || (requestedAction === 'auto' && /\b(plan|create|make|generate)\b.{0,30}\b(video|film|short|episode)\b/i.test(lower));
-
-      let selectedTool = 'chat.generate';
-      let toolInput = { messages: normalizedMessages };
-      let intent = 'conversation';
-
-      if (wantsImage) {
-        const prompt = String(imagePrompt || latestMessage).trim();
-        if (!prompt) throw Object.assign(new Error('An image prompt is required.'), { statusCode: 400 });
-        selectedTool = 'image.generate';
-        intent = 'image_generation';
-        toolInput = { prompt, referenceImage };
-      } else if (wantsVideo) {
-        if (!videoProjectId) {
-          throw Object.assign(new Error('A video project id is required for video planning.'), { statusCode: 400 });
-        }
-        selectedTool = 'video.plan';
-        intent = 'video_planning';
-        toolInput = { projectId: videoProjectId, request: videoRequest };
-      }
-
       const requestId = crypto.randomUUID();
-      const plan = {
-        intent,
-        summary: selectedTool === 'chat.generate'
-          ? 'Answer the user through the central JARVIS tool registry.'
-          : `Route the request to the ${selectedTool} capability through the central JARVIS tool registry.`,
-        steps: [{
-          id: `step_${selectedTool.replace(/[^a-z0-9]+/gi, '_')}`,
-          tool: selectedTool,
-          purpose: selectedTool === 'chat.generate' ? 'Generate the assistant response.' : 'Execute the requested JARVIS capability.',
-          input: selectedTool === 'chat.generate'
-            ? { messageCount: normalizedMessages.length }
-            : { delegated: true },
-          requiresApproval: false,
-        }],
-        requiresApproval: false,
-      };
+      const plan = buildPlan({
+        latestMessage,
+        normalizedMessages,
+        action,
+        imagePrompt,
+        referenceImage,
+        videoProjectId,
+        videoRequest,
+      });
 
-      const tool = registry.get(selectedTool);
-      if (!tool) throw new Error(`JARVIS tool is not registered: ${selectedTool}`);
-      const results = await executePlan(plan.steps.map(step => ({
-        ...step,
-        input: selectedTool === 'chat.generate' ? { messages: normalizedMessages } : toolInput,
-        retries: 1,
-      })), {
+      const results = await executePlan(plan.steps, {
         user: { id: userId },
         memories,
         preferences,
+        requestId,
       });
 
+      const verified = results.length === plan.steps.length && results.every(item => item.verification?.ok);
       const result = results[results.length - 1];
-      const verified = results.every(item => item.verification?.ok);
       const responseData = result?.data;
 
       return {
         success: Boolean(verified && result?.success),
         requestId,
-        response: verified && responseData?.text ? { text: responseData.text, metadata: { provider: responseData.provider, model: responseData.model } } : undefined,
+        response: verified && responseData?.text
+          ? { text: responseData.text, metadata: { provider: responseData.provider, model: responseData.model } }
+          : undefined,
         capability: verified && responseData && !responseData.text ? responseData : undefined,
         execution: { plan, results, verified },
         error: verified ? undefined : result?.error || { code: 'EXECUTION_VERIFICATION_FAILED', message: 'JARVIS could not verify the execution result.' },
