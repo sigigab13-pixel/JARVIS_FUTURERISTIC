@@ -37,6 +37,7 @@ import {
   queueVideoJobForUser,
 } from './store.mjs';
 import { enqueueJob, isRedisConfigured } from './queue.mjs';
+import { createMediaKey, isR2Configured, putMedia } from './media.mjs';
 
 const PORT = Number(process.env.PORT || 10000);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -577,8 +578,25 @@ export async function handleApi(req, res, pathname, url) {
       const blob = await generateHuggingFaceImage(prompt, pathname.endsWith('/edit') ? HF_IMAGE_EDIT_MODEL : HF_IMAGE_MODEL, pathname.endsWith('/edit') ? reference : null);
       const consumed = await consumeImageGeneration(jarvisUser.id, { prompt: prompt.slice(0, 500), mode: pathname.endsWith('/edit') ? 'edit' : 'generate' });
       const buffer = Buffer.from(await blob.arrayBuffer());
+      const mimeType = blob.type || 'image/png';
+      let media = null;
+      if (isR2Configured()) {
+        const extension = mimeType.includes('jpeg') ? 'jpg' : mimeType.includes('webp') ? 'webp' : 'png';
+        try {
+          const key = createMediaKey({ userId: jarvisUser.id, kind: pathname.endsWith('/edit') ? 'image-edit' : 'image', extension });
+          media = await putMedia({
+            key,
+            body: buffer,
+            contentType: mimeType,
+            metadata: { user_id: jarvisUser.id, source: pathname.endsWith('/edit') ? 'image_edit' : 'image_generate' },
+          });
+        } catch (storageError) {
+          console.error('JARVIS R2 media upload error:', storageError);
+        }
+      }
       return json(res, 200, {
-        image: { data: buffer.toString('base64'), mimeType: blob.type || 'image/png' },
+        image: { data: buffer.toString('base64'), mimeType },
+        media,
         allowance: { remaining: Number(consumed?.credits_remaining ?? remainingBefore - 1) },
       }, { 'Set-Cookie': jarvisCookie(jarvisUser.id) });
     } catch (error) {
