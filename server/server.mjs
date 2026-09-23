@@ -20,6 +20,11 @@ import {
   ensureJarvisEntitlement,
   getJarvisEntitlement,
   consumeImageGeneration,
+  getBusinessForUser,
+  createBusinessForUser,
+  updateBusinessForUser,
+  getBrandKitForUser,
+  upsertBrandKitForUser,
 } from './store.mjs';
 
 const PORT = Number(process.env.PORT || 10000);
@@ -156,6 +161,32 @@ function safePath(urlPath) {
 export async function handleApi(req, res, pathname, url) {
   if (req.method === 'GET' && pathname === '/api/_healthcheck') {
     return json(res, 200, { message: 'Success', service: 'JARVIS', deployment: 'vercel' });
+  }
+
+  if (req.method === 'GET' && pathname === '/api/business') {
+    const { jarvisUser } = await requireAuthenticatedJarvisUser(req);
+    const business = await getBusinessForUser(jarvisUser.id);
+    const brandKit = business ? await getBrandKitForUser(jarvisUser.id, business.id) : null;
+    return json(res, 200, { business, brandKit });
+  }
+
+  if (req.method === 'POST' && pathname === '/api/business') {
+    const { jarvisUser } = await requireAuthenticatedJarvisUser(req);
+    const body = await parseBody(req);
+    const existing = await getBusinessForUser(jarvisUser.id);
+    const business = existing
+      ? await updateBusinessForUser(jarvisUser.id, existing.id, body)
+      : await createBusinessForUser(jarvisUser.id, body);
+    return json(res, 200, { business });
+  }
+
+  if (req.method === 'POST' && pathname === '/api/business/brand-kit') {
+    const { jarvisUser } = await requireAuthenticatedJarvisUser(req);
+    const body = await parseBody(req);
+    const business = await getBusinessForUser(jarvisUser.id);
+    if (!business) return json(res, 400, { error: 'Create your business profile first.' });
+    const brandKit = await upsertBrandKitForUser(jarvisUser.id, business.id, body);
+    return json(res, 200, { brandKit });
   }
 
   if (req.method === 'GET' && pathname === '/api/plans') {
