@@ -217,8 +217,8 @@ export async function handleApi(req, res, pathname, url) {
     const accessToken = String(input.accessToken || '').trim();
     if (!accessToken) return json(res, 401, { error: 'Authentication token is required.' });
     const supabaseUrl = (process.env.SUPABASE_URL || '').replace(/\/$/, '');
-    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-    if (!supabaseUrl || !serviceRoleKey) return json(res, 503, { error: 'Supabase authentication is not configured on this deployment.' });
+    const supabaseServerKey = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+    if (!supabaseUrl || !supabaseServerKey) return json(res, 503, { error: 'Supabase authentication is not configured on this deployment.' });
     const response = await fetch(supabaseUrl + '/auth/v1/user', {
       headers: { apikey: supabaseServerKey, Authorization: 'Bearer ' + accessToken },
     });
