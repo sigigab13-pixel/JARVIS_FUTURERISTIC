@@ -12,6 +12,8 @@ import {
   deleteOAuthState,
   getYouTubeConnection,
   saveYouTubeConnection,
+  searchSemanticMemories,
+  saveSemanticMemory,
 } from './store.mjs';
 
 const PORT = Number(process.env.PORT || 10000);
@@ -139,6 +141,24 @@ async function handleApi(req, res, pathname, url) {
     await ensureJarvisUser(userId);
     const token = process.env.HUGGINGFACE_API_TOKEN;
     if (!token) return json(res, 503, { error: 'Hugging Face AI is not configured on this deployment.' });
+
+    const latestUserMessage = String(messages[messages.length - 1]?.content || '').trim();
+    let semanticMemories = [];
+    try {
+      semanticMemories = await searchSemanticMemories(userId, latestUserMessage, { threshold: 0.72, count: 8 });
+    } catch (memoryError) {
+      console.error('Semantic memory retrieval error:', memoryError);
+    }
+
+    const memoryContext = semanticMemories.length
+      ? `Relevant long-term memories for this user:\n${semanticMemories.map((m, i) => `${i + 1}. ${String(m.content || '').trim()}`).join('\n')}\nUse these only when relevant. Do not mention the memory system unless asked.`
+      : '';
+
+    const systemMessage = [
+      "You are JARVIS, Saviour's helpful AI assistant. Be accurate, concise, friendly, and honest about capabilities. Do not claim an action happened unless the connected service confirms it. For security topics, stay defensive and educational. For NEXORA, keep trading simulated/paper-only.",
+      memoryContext,
+    ].filter(Boolean).join('\n\n');
+
     const response = await fetch(HF_CHAT_URL, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -147,7 +167,7 @@ async function handleApi(req, res, pathname, url) {
         messages: [
           {
             role: 'system',
-            content: "You are JARVIS, Saviour's helpful AI assistant. Be accurate, concise, friendly, and honest about capabilities. Do not claim an action happened unless the connected service confirms it. For security topics, stay defensive and educational. For NEXORA, keep trading simulated/paper-only.",
+            content: systemMessage,
           },
           ...messages,
         ],
@@ -159,8 +179,22 @@ async function handleApi(req, res, pathname, url) {
     if (!response.ok) return json(res, response.status >= 400 && response.status < 500 ? 400 : 502, { error: data?.error?.message || 'Hugging Face AI request failed.' });
     const text = String(data?.choices?.[0]?.message?.content || '').trim();
     if (!text) return json(res, 502, { error: 'The AI core returned an empty response.' });
+    const shouldRemember = /\b(remember|don't forget|do not forget|keep in mind|i prefer|i like|my favorite|i want|my goal|i plan to|i am building|i'm building|we decided|from now on|call me)\b/i.test(latestUserMessage)
+      && latestUserMessage.length >= 12;
+
+    if (shouldRemember) {
+      try {
+        await saveSemanticMemory(userId, latestUserMessage, {
+          source: 'chat',
+          importance: /\b(remember|don't forget|do not forget|from now on|call me)\b/i.test(latestUserMessage) ? 0.9 : 0.7,
+        }, 'chat_memory');
+      } catch (memoryError) {
+        console.error('Semantic memory save error:', memoryError);
+      }
+    }
+
     await appendConversationMessages(userId, [
-      { role: 'user', content: String(messages[messages.length - 1]?.content || '') },
+      { role: 'user', content: latestUserMessage },
       { role: 'assistant', content: text },
     ]);
     return json(
