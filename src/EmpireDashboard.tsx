@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
-import { api } from '@appdeploy/client';
+import { api } from './api';
 import { checkPrimeStatus, initialPrime, recordPaperTrade, receiveContentEarnings, revivePrime, type PrimeState } from './prime';
 import { evaluateForest, forestRevenue, initialForest, simulateForestDay, blowScore, type ForestState } from './forest';
 import { fleetStats, initialBots, simulateFleetCycle, type NexoraBot } from './nexoraBots';
