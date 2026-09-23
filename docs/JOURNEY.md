@@ -127,3 +127,10 @@ Public updates should be honest about project status.
 Do not claim a feature is deployed, production-ready, connected, or working unless it has actually been verified.
 
 When a feature fails, document the failure and the fix. Those failures are part of the real engineering journey.
+
+
+### Entry 003 — Durable worker heartbeat hardening
+
+The JARVIS worker was hardened for long-running background jobs. Workers now refresh job heartbeats while processing so longer tasks can keep their execution lease alive. This prepares the system for future Oracle Cloud workers and longer video, memory, and automation jobs.
+
+Development partner: GPT-5.6 Luna.
