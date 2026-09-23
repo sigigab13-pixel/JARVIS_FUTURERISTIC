@@ -75,6 +75,16 @@ function parseBody(req) {
   });
 }
 
+function classifyMemory(text) {
+  const value = String(text || '').trim().toLowerCase();
+  if (/\\b(call me|my name is|i am|i'm)\\b/.test(value)) return { type: 'identity', importance: 0.95 };
+  if (/\\b(i prefer|i like|i love|my favorite|i dislike|i hate|i don't like)\\b/.test(value)) return { type: 'preference', importance: 0.85 };
+  if (/\\b(my goal|i plan to|i want to become|i want to build|i'm building|i am building)\\b/.test(value)) return { type: 'goal', importance: 0.9 };
+  if (/\\b(we decided|from now on|always|never|use .* instead|the architecture|the plan is)\\b/.test(value)) return { type: 'project_decision', importance: 0.9 };
+  if (/\\b(remember|don't forget|do not forget|keep in mind)\\b/.test(value)) return { type: 'instruction', importance: 0.9 };
+  return { type: 'chat_memory', importance: 0.7 };
+}
+
 function safePath(urlPath) {
   const decoded = decodeURIComponent(urlPath.split('?')[0]);
   const requested = decoded === '/' ? '/index.html' : decoded;
