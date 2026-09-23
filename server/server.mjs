@@ -56,11 +56,11 @@ function jarvisCookie(userId) {
 
 async function requireAuthenticatedJarvisUser(req) {
   const authorization = String(req.headers.authorization || '');
-  const match = authorization.match(/^Bearer\\s+(.+)$/i);
+  const match = authorization.match(/^Bearer\s+(.+)$/i);
   const accessToken = match?.[1]?.trim() || '';
   if (!accessToken) throw Object.assign(new Error('Authentication required.'), { statusCode: 401 });
 
-  const supabaseUrl = (process.env.SUPABASE_URL || '').replace(/\\/$/, '');
+  const supabaseUrl = (process.env.SUPABASE_URL || '').replace(/\/$/, '');
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
   if (!supabaseUrl || !serviceRoleKey) {
     throw Object.assign(new Error('Supabase authentication is not configured on this deployment.'), { statusCode: 503 });
