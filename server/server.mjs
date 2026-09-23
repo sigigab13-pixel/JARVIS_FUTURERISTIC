@@ -391,6 +391,24 @@ export async function handleApi(req, res, pathname, url) {
     return json(res, 200, { ok: true, user: { id: jarvisUser.id, name: jarvisUser.name, email: jarvisUser.email || user.email || null } }, { 'Set-Cookie': jarvisCookie(jarvisUser.id) });
   }
 
+  if (req.method === 'GET' && pathname === '/api/jarvis/tools') {
+    const { jarvisUser } = await requireAuthenticatedJarvisUser(req);
+    const token = process.env.HUGGINGFACE_API_TOKEN;
+    if (!token) return json(res, 503, { error: 'JARVIS AI is not configured.' });
+
+    const orchestrator = createJarvisOrchestrator({
+      userId: jarvisUser.id,
+      preferences: await getJarvisPreferences(jarvisUser.id),
+      hfToken: token,
+      model: HF_MODEL,
+    });
+
+    return json(res, 200, {
+      userId: jarvisUser.id,
+      tools: orchestrator.registry.list(),
+    }, { 'Set-Cookie': jarvisCookie(jarvisUser.id) });
+  }
+
   if (req.method === 'POST' && pathname === '/api/jarvis') {
     const input = await parseBody(req);
     const messages = Array.isArray(input.messages)
