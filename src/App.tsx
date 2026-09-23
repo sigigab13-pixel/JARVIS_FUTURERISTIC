@@ -514,8 +514,8 @@ function App() {
     setVideoBusy(true); setVideoError('');
     try {
       const response = await api.post('/api/video/projects/' + videoProject.id + '/characters', {
-        name: 'New Character',
-        role: 'Character',
+        name: window.prompt('Character name')?.trim() || 'New Character',
+        role: window.prompt('Character role')?.trim() || 'Character',
         profile: { personality: '', history: '', speaking_style: '' },
         appearance: { face: '', hair: '', clothing: '', visual_identity: '' },
         voice: { provider: 'elevenlabs', voice_id: '', speaking_style: '' },
