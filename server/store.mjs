@@ -5,6 +5,8 @@ const configured = Boolean(SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY);
 const memory = {
   oauth: new Map(),
   youtube: null,
+  users: new Map(),
+  conversations: new Map(),
 };
 
 export function persistenceMode() {
@@ -81,4 +83,84 @@ export async function saveYouTubeConnection(connection) {
       connected_at: connection.connectedAt,
     }),
   });
+}
+
+
+function validUuid(value) {
+  return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+export async function ensureJarvisUser(userId) {
+  if (!validUuid(userId)) throw new Error('Invalid JARVIS user id.');
+  if (!configured) {
+    if (!memory.users.has(userId)) memory.users.set(userId, { id: userId, name: 'Guest' });
+    return memory.users.get(userId);
+  }
+  const existing = await request(`jarvis_users?select=id,name,preferences&id=eq.${encodeURIComponent(userId)}&limit=1`);
+  if (existing?.[0]) return existing[0];
+  const rows = await request('jarvis_users', {
+    method: 'POST',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify({ id: userId, name: 'Guest', preferences: {} }),
+  });
+  return rows?.[0] || { id: userId, name: 'Guest', preferences: {} };
+}
+
+export async function getOrCreateConversation(userId) {
+  if (!configured) {
+    if (!memory.conversations.has(userId)) memory.conversations.set(userId, []);
+    return { id: userId };
+  }
+  const rows = await request(`conversations?select=id,title&user_id=eq.${encodeURIComponent(userId)}&order=created_at.asc&limit=1`);
+  if (rows?.[0]) return rows[0];
+  const created = await request('conversations', {
+    method: 'POST',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify({ user_id: userId, title: 'JARVIS Conversation' }),
+  });
+  if (!created?.[0]) throw new Error('Could not create JARVIS conversation.');
+  return created[0];
+}
+
+export async function appendConversationMessages(userId, messages) {
+  const conversation = await getOrCreateConversation(userId);
+  const normalized = messages
+    .filter(m => ['user', 'assistant', 'system'].includes(String(m?.role)) && String(m?.content || '').trim())
+    .map(m => ({
+      conversation_id: conversation.id,
+      role: String(m.role),
+      content: String(m.content).trim(),
+    }));
+  if (!normalized.length) return;
+  if (!configured) {
+    const current = memory.conversations.get(userId) || [];
+    current.push(...normalized.map(m => ({ role: m.role, content: m.content, created_at: new Date().toISOString() })));
+    memory.conversations.set(userId, current.slice(-200));
+    return;
+  }
+  await request('conversation_messages', {
+    method: 'POST',
+    headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify(normalized),
+  });
+  await request(`conversations?id=eq.${encodeURIComponent(conversation.id)}`, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify({ updated_at: new Date().toISOString() }),
+  });
+}
+
+export async function getConversationMessages(userId, limit = 50) {
+  const safeLimit = Math.min(200, Math.max(1, Number(limit) || 50));
+  const conversation = await getOrCreateConversation(userId);
+  if (!configured) {
+    return (memory.conversations.get(userId) || []).slice(-safeLimit).map(m => ({
+      role: m.role,
+      content: m.content,
+    }));
+  }
+  const rows = await request(
+    `conversation_messages?select=role,content,created_at&conversation_id=eq.${encodeURIComponent(conversation.id)}&order=created_at.asc&limit=${safeLimit}`
+  );
+  return (rows || []).map(m => ({ role: m.role, content: m.content }));
 }
