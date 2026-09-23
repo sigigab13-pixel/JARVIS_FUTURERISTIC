@@ -82,6 +82,18 @@ function App() {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, busy]);
 
+  useEffect(() => {
+    let active = true;
+    void api.get('/api/chat/history').then(response => {
+      const cloudMessages = Array.isArray(response.data?.messages) ? response.data.messages : [];
+      if (!active || cloudMessages.length === 0) return;
+      setMessages(cloudMessages.filter((m: any) => m?.role === 'user' || m?.role === 'assistant'));
+    }).catch(() => {
+      // Local memory remains available if the cloud memory service is temporarily unavailable.
+    });
+    return () => { active = false; };
+  }, []);
+
   const speak = (text: string) => {
     if (!voiceEnabled || !('speechSynthesis' in window)) return;
     const synth = window.speechSynthesis;
