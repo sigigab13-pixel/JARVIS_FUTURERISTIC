@@ -1,199 +1,201 @@
-# JARVIS — Empire Command
+# JARVIS — Futureristic AI Platform
 
-> An independent AI assistant platform being built by Saviour to bring conversation, orchestration, voice, automation, content production, and useful tools into one system.
+> An independent AI platform being built by Saviour, with GPT-5.6 Luna as the AI development partner.
 
-[![Live Demo](https://img.shields.io/badge/Live%20Demo-JARVIS%20Empire%20Command-00d4ff?style=for-the-badge)](https://saviour-s-jarvis-1xvud3.v2.appdeploy.ai/)
-[![Repository](https://img.shields.io/badge/GitHub-Source-181717?style=for-the-badge&logo=github)](https://github.com/sigigab13-pixel/JARVIS_FUTURERISTIC)
+JARVIS is being built as a broader AI operating platform — not just a chatbot and not just a content generator. The long-term goal is to bring conversation, memory, business management, offices, automation, image generation, video production, voice, publishing, and reliability systems into one product.
 
-## 🚀 What is JARVIS?
-
-JARVIS is a long-term project focused on building a modular AI command platform rather than a single-purpose chatbot.
-
-The goal is to connect multiple capabilities behind one assistant experience:
+## 🚀 What we are building
 
 - 💬 AI conversation and command handling
-- 🧠 Orchestration and capability routing
-- ⚡ Realtime application communication
-- 🎙️ Voice and text interaction
-- ▶️ YouTube account connection through Google OAuth
-- 🎬 Forest content-production planning
-- 📊 NEXORA market/trading simulation components
-- 📱 Progressive Web App support
-- 🧩 A central capability/tool registry designed for future expansion
+- 🧠 Persistent memory and personalization
+- 🔐 Google sign-in and authenticated user accounts
+- 🏢 Business management and Brand Kit
+- 🎙️ Voice/TTS with ElevenLabs
+- 🖼️ Image Lab and image editing
+- 🎬 Video Studio / Video Engine
+- 🌲 Forest autonomous content-production system
+- 🧰 Specialized JARVIS offices
+- ⚙️ Background jobs, scheduling, repair and recovery
+- 📊 Usage, plans and entitlements
+- 🎨 User customization and branding
+- 📣 Future publishing and analytics integrations
+- ☁️ Multi-cloud architecture for scalable production
 
-The project is being developed in public so people can follow the architecture, test the application, report problems, and contribute ideas.
+## 🏗️ Current architecture
 
-## 🌐 Try JARVIS
-
-**Live application:**  
-https://saviour-s-jarvis-1xvud3.v2.appdeploy.ai/
-
-**Source code:**  
-https://github.com/sigigab13-pixel/JARVIS_FUTURERISTIC
-
-The live application is deployed separately from this repository. The repository contains the application source; deployment-specific secrets are kept outside the public codebase.
-
-## 🏗️ Current Architecture
-
-The current source is organized around a frontend, backend orchestration layer, realtime services, and modular capability panels.
+JARVIS is being rebuilt around a multi-cloud foundation:
 
 ```text
-JARVIS_FUTURERISTIC/
-├── backend/
-│   ├── index.ts
-│   ├── orchestrator/
-│   │   ├── registry.ts
-│   │   └── types.ts
-│   ├── realtime.ts
-│   └── realtime-subscribers.ts
-├── src/
-│   ├── App.tsx
-│   ├── CapabilityCenter.tsx
-│   ├── EmpireDashboard.tsx
-│   ├── VoiceEnginePanel.tsx
-│   ├── YouTubeConnectionPanel.tsx
-│   ├── forest.ts
-│   ├── nexoraBots.ts
-│   └── prime.ts
-├── public/
-│   ├── manifest.webmanifest
-│   └── sw.js
-├── tests/
-├── index.html
-├── package.json
-├── tsconfig.json
-├── vite.config.ts
-├── tailwind.config.js
-└── postcss.config.js
+GitHub
+   │
+   ├── Source control
+   │
+Vercel
+   ├── Frontend / web application
+   └── API deployment
+        │
+        ├──────── Supabase
+        │          ├── Auth
+        │          ├── PostgreSQL
+        │          ├── Memory
+        │          ├── Jobs / state
+        │          └── Vector memory
+        │
+        ├──────── Oracle Cloud
+        │          └── Long-running workers / rendering / automation
+        │
+        ├──────── Cloudflare R2
+        │          └── Media/object storage
+        │
+        └──────── Upstash Redis
+                   └── Queues / cache
 ```
+
+Not every planned cloud component is connected yet. The repository is being developed toward this architecture incrementally.
+
+## 🎬 Video Engine
+
+The Video Engine is being built as a real production pipeline rather than a simple slideshow generator.
+
+Its architecture includes:
+
+- Story Director
+- Character Bible
+- Outfit Engine
+- World / Asset Bible
+- Scene Director
+- Storyboard / Cost Gate
+- Visual Generation
+- Motion Engine
+- Voice / Audio
+- Lip-sync
+- Editing / transitions
+- Localization
+- Subtitles
+- Preview
+- A/B variations
+- Continuity and Brand QA
+- Repair / recovery
+- Change Manager
+- Asset cache / reuse
+- Prompt memory
+- Resource / quota management
+- Rendering
+- Aspect-ratio adaptation
+- Final QA
+- Versioning
+- Metadata / thumbnails
+- Publishing
+- Performance memory
+
+The current repository already contains the foundation for persistent video projects, characters, assets and scenes, plus Video Studio editing and production-planning flows.
+
+## 💼 Business platform
+
+JARVIS is also being designed to help users manage businesses:
+
+- Business profile
+- Products and services
+- Customers
+- Projects and tasks
+- Documents
+- Business knowledge
+- Brand Kit
+- Marketing workflows
+- Content calendars
+- Reports and analytics
+- Automation
+- Specialized AI offices
+
+The Brand Kit is intended to become a shared source of truth for generated images, videos, documents and marketing content.
+
+## 💰 Product direction
+
+The intended business model includes free and paid plans with different access levels, generation allowances and advanced capabilities.
+
+Planned premium capabilities include advanced video, larger image allowances, advanced offices, automation, customization, API access and other business features.
+
+Prices and limits are subject to change as real operating costs and user demand become clearer.
+
+## 🌲 Forest
+
+Forest sits above the production engines as an autonomous content/business workflow.
+
+The planned loop is:
+
+```text
+Research
+  ↓
+Trend detection
+  ↓
+Story / content planning
+  ↓
+Production
+  ↓
+Quality control
+  ↓
+Approval
+  ↓
+Publishing
+  ↓
+Analytics
+  ↓
+Learning
+  ↺
+```
+
+Forest is one part of JARVIS, not the entire product.
 
 ## 🔐 Security
 
-JARVIS uses deployment-side secret management for sensitive credentials.
+Sensitive credentials belong in deployment environment variables or managed secrets.
 
-The public repository does **not** contain:
+Never commit:
 
-- Google OAuth client secrets
-- Hugging Face API tokens
-- Google Cloud TTS API keys
-- User access/refresh token values
+- API keys
+- OAuth client secrets
+- access/refresh tokens
+- passwords
+- private keys
+- database secrets
 
-Instead, the application reads required secrets from the deployment environment. This keeps credentials out of the GitHub source.
+The public repository should contain source code and documentation, not private credentials.
 
-**Important:** Never commit your own API keys, OAuth secrets, passwords, or tokens to this repository.
+## 📖 Build in public
 
-## 🧭 Roadmap
+This project is being built publicly so people can follow the real journey.
 
-### Phase 1 — Foundation
-- [x] Establish the JARVIS Empire Command interface
-- [x] Add central capability/orchestration contracts
-- [x] Add realtime infrastructure
-- [x] Add voice-engine panel
-- [x] Add YouTube OAuth connection flow
-- [x] Add Forest and NEXORA modules
-- [x] Publish the source repository
+Every major milestone can become:
 
-### Phase 2 — Capability Execution
-- [ ] Connect the orchestration registry to production executors
-- [ ] Expand tool/capability routing
-- [ ] Improve realtime command feedback
-- [ ] Strengthen error handling and observability
-- [ ] Expand automated tests
+- a development journal entry
+- a technical write-up
+- a social-media update
+- a short-video script
+- a GitHub milestone
+- a launch/update announcement
 
-### Phase 3 — Forest Content Engine
-- [ ] Content ideation and trend monitoring
-- [ ] Story and script generation
-- [ ] Character and continuity management
-- [ ] Video production workflow
-- [ ] Thumbnail generation/testing
-- [ ] Approval gates before publishing
-- [ ] YouTube/TikTok/Facebook publishing workflows
+The goal is to document what was actually built, what failed, what was fixed, and what comes next.
 
-### Phase 4 — Personalization
-- [ ] Visitor/user profiles
-- [ ] Personal assistant preferences
-- [ ] Memory and context systems
-- [ ] Custom themes and branding
-- [ ] More integrations and user-authorized tools
+See [docs/JOURNEY.md](docs/JOURNEY.md).
 
-### Phase 5 — Reliability & Scale
-- [ ] More resilient infrastructure
-- [ ] Background jobs and scheduling
-- [ ] Monitoring and recovery workflows
-- [ ] Production-grade data architecture
-- [ ] Scalable deployment strategy
+## 🤝 Support JARVIS
 
-## 🛠️ Technology
+You can support the project without spending money:
 
-The current project includes:
-
-- TypeScript
-- React
-- Vite
-- Tailwind CSS
-- AppDeploy SDK
-- Realtime application services
-- Google OAuth integration
-- Progressive Web App technologies
-
-The architecture is intentionally modular so new capabilities can be added without rebuilding the entire application.
-
-## 🤝 How You Can Help
-
-JARVIS is an independent project, and there are many ways to support it.
-
-### ⭐ No-cost support
-
-- Star the repository
+- ⭐ Star the repository
 - Share the project
-- Test the live application
+- Test features
 - Report bugs
-- Suggest useful features
+- Suggest improvements
 - Review the architecture
 - Contribute documentation or code
-- Give constructive feedback
 
-### 💻 Hardware and development support
-
-Development is currently being done with limited hardware. If you want to support the project directly, useful contributions could include:
-
-- A stronger development laptop or Mac
-- A modern phone for mobile testing
-- External storage
-- Development accessories
-- Cloud or hosting resources
-- AI/API credits
-
-Hardware support can directly improve the ability to build, test, and demonstrate new JARVIS features.
-
-## 📣 Community & Contributions
-
-If you find a bug or have an idea, open an issue in this repository with:
-
-1. What you expected
-2. What actually happened
-3. Steps to reproduce the problem
-4. Screenshots or logs when useful
-5. Your suggested improvement, if you have one
-
-Pull requests are welcome as the project develops.
-
-## ⚠️ Project Status
-
-JARVIS is an actively developing project. Some modules are experimental, incomplete, or still being connected to their production executors.
-
-The live application should therefore be treated as a development project rather than a finished commercial product.
+Development is being done with limited hardware, so legitimate support such as development hardware, cloud resources, storage, or AI/API credits can also help the project progress.
 
 ## 👤 Creator
 
 **Saviour** — Creator and developer of JARVIS.
 
-The project is being built step by step with the goal of turning the current foundation into a broader AI command and automation platform.
+**GPT-5.6 Luna** — AI development partner helping build, debug, document and evolve the platform.
 
----
-
-### ⭐ If you want to follow the journey
-
-Star the repository, try the live demo, share useful feedback, and help JARVIS grow.
-
-**JARVIS is being built in public — one capability at a time.**
+> **JARVIS is being built in public — one capability at a time.**
