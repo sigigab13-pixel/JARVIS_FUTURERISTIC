@@ -12,6 +12,7 @@ import {
   deleteOAuthState,
   getYouTubeConnection,
   saveYouTubeConnection,
+  ensureJarvisAuthUser,
   searchSemanticMemories,
   saveSemanticMemory,
 } from './store.mjs';
@@ -130,6 +131,22 @@ async function handleApi(req, res, pathname, url) {
     const data = await response.json();
     if (!response.ok || !data.audioContent) return json(res, response.status >= 400 && response.status < 500 ? 400 : 502, { error: data?.error?.message || 'Google TTS request failed.' });
     return json(res, 200, { audioContent: data.audioContent, mimeType: 'audio/mpeg', voice: input.voice, languageCode: input.languageCode });
+  }
+
+  if (req.method === 'POST' && pathname === '/api/auth/sync') {
+    const input = await parseBody(req);
+    const accessToken = String(input.accessToken || '').trim();
+    if (!accessToken) return json(res, 401, { error: 'Authentication token is required.' });
+    const supabaseUrl = (process.env.SUPABASE_URL || '').replace(/\/$/, '');
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+    if (!supabaseUrl || !serviceRoleKey) return json(res, 503, { error: 'Supabase authentication is not configured on this deployment.' });
+    const response = await fetch(supabaseUrl + '/auth/v1/user', {
+      headers: { apikey: serviceRoleKey, Authorization: 'Bearer ' + accessToken },
+    });
+    const user = await response.json().catch(() => ({}));
+    if (!response.ok || !user?.id) return json(res, 401, { error: 'Your JARVIS session is invalid or expired.' });
+    const jarvisUser = await ensureJarvisAuthUser(user);
+    return json(res, 200, { ok: true, user: { id: jarvisUser.id, name: jarvisUser.name, email: jarvisUser.email || user.email || null } }, { 'Set-Cookie': jarvisCookie(jarvisUser.id) });
   }
 
   if (req.method === 'GET' && pathname === '/api/chat/history') {
