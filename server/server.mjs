@@ -67,13 +67,13 @@ async function requireAuthenticatedJarvisUser(req) {
   if (!accessToken) throw Object.assign(new Error('Authentication required.'), { statusCode: 401 });
 
   const supabaseUrl = (process.env.SUPABASE_URL || '').replace(/\/$/, '');
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-  if (!supabaseUrl || !serviceRoleKey) {
+  const supabaseServerKey = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+  if (!supabaseUrl || !supabaseServerKey) {
     throw Object.assign(new Error('Supabase authentication is not configured on this deployment.'), { statusCode: 503 });
   }
 
   const response = await fetch(supabaseUrl + '/auth/v1/user', {
-    headers: { apikey: serviceRoleKey, Authorization: 'Bearer ' + accessToken },
+    headers: { apikey: supabaseServerKey, Authorization: 'Bearer ' + accessToken },
   });
   const user = await response.json().catch(() => ({}));
   if (!response.ok || !user?.id) {
@@ -220,7 +220,7 @@ export async function handleApi(req, res, pathname, url) {
     const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
     if (!supabaseUrl || !serviceRoleKey) return json(res, 503, { error: 'Supabase authentication is not configured on this deployment.' });
     const response = await fetch(supabaseUrl + '/auth/v1/user', {
-      headers: { apikey: serviceRoleKey, Authorization: 'Bearer ' + accessToken },
+      headers: { apikey: supabaseServerKey, Authorization: 'Bearer ' + accessToken },
     });
     const user = await response.json().catch(() => ({}));
     if (!response.ok || !user?.id) return json(res, 401, { error: 'Your JARVIS session is invalid or expired.' });
