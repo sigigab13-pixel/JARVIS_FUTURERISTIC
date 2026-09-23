@@ -155,13 +155,16 @@ async function handleApi(req, res, pathname, url) {
     const latestUserMessage = String(messages[messages.length - 1]?.content || '').trim();
     let semanticMemories = [];
     try {
-      semanticMemories = await searchSemanticMemories(userId, latestUserMessage, { threshold: 0.72, count: 8 });
+      semanticMemories = await searchSemanticMemories(userId, latestUserMessage, {
+        threshold: 0.72,
+        count: 8,
+      });
     } catch (memoryError) {
       console.error('Semantic memory retrieval error:', memoryError);
     }
 
     const memoryContext = semanticMemories.length
-      ? `Relevant long-term memories for this user:\n${semanticMemories.map((m, i) => `${i + 1}. ${String(m.content || '').trim()}`).join('\n')}\nUse these only when relevant. Do not mention the memory system unless asked.`
+      ? `Relevant long-term memories for this user, ranked by relevance and importance:\n${semanticMemories.map((m, i) => `${i + 1}. [${String(m.memory_type || 'memory')}] ${String(m.content || '').trim()}`).join('\n')}\nUse only memories that genuinely help answer the current request. Prefer identity, preferences, goals, project decisions, and explicit instructions when relevant. Do not mention the memory system unless asked.`
       : '';
 
     const systemMessage = [
