@@ -25,6 +25,14 @@ import {
   updateBusinessForUser,
   getBrandKitForUser,
   upsertBrandKitForUser,
+  createVideoProjectForUser,
+  getVideoProjectsForUser,
+  getVideoProjectForUser,
+  addVideoCharacterForUser,
+  getVideoCharactersForUser,
+  addVideoSceneForUser,
+  getVideoScenesForUser,
+  queueVideoJobForUser,
 } from './store.mjs';
 
 const PORT = Number(process.env.PORT || 10000);
@@ -187,6 +195,79 @@ export async function handleApi(req, res, pathname, url) {
     if (!business) return json(res, 400, { error: 'Create your business profile first.' });
     const brandKit = await upsertBrandKitForUser(jarvisUser.id, business.id, body);
     return json(res, 200, { brandKit });
+  }
+
+  if (pathname.startsWith('/api/video')) {
+    const { jarvisUser } = await requireAuthenticatedJarvisUser(req);
+    const entitlement = await ensureJarvisEntitlement(jarvisUser.id);
+    const features = entitlement?.jarvis_plans?.features || {};
+    if (features.advanced_video !== true) {
+      return json(res, 403, { error: 'Video Engine requires a plan with advanced video access.', code: 'VIDEO_FEATURE_LOCKED' });
+    }
+
+    if (req.method === 'GET' && pathname === '/api/video/projects') {
+      return json(res, 200, { projects: await getVideoProjectsForUser(jarvisUser.id) });
+    }
+
+    if (req.method === 'POST' && pathname === '/api/video/projects') {
+      const body = await parseBody(req);
+      const project = await createVideoProjectForUser(jarvisUser.id, body);
+      return json(res, 201, { project });
+    }
+
+    const projectMatch = pathname.match(/^\/api\/video\/projects\/([0-9a-f-]{36})$/i);
+    if (req.method === 'GET' && projectMatch) {
+      const project = await getVideoProjectForUser(jarvisUser.id, projectMatch[1]);
+      if (!project) return json(res, 404, { error: 'Video project not found.' });
+      return json(res, 200, { project });
+    }
+
+    const charactersMatch = pathname.match(/^\/api\/video\/projects\/([0-9a-f-]{36})\/characters$/i);
+    if (charactersMatch) {
+      const projectId = charactersMatch[1];
+      if (req.method === 'GET') return json(res, 200, { characters: await getVideoCharactersForUser(jarvisUser.id, projectId) });
+      if (req.method === 'POST') {
+        const body = await parseBody(req);
+        return json(res, 201, { character: await addVideoCharacterForUser(jarvisUser.id, projectId, body) });
+      }
+    }
+
+    const scenesMatch = pathname.match(/^\/api\/video\/projects\/([0-9a-f-]{36})\/scenes$/i);
+    if (scenesMatch) {
+      const projectId = scenesMatch[1];
+      if (req.method === 'GET') return json(res, 200, { scenes: await getVideoScenesForUser(jarvisUser.id, projectId) });
+      if (req.method === 'POST') {
+        const body = await parseBody(req);
+        return json(res, 201, { scene: await addVideoSceneForUser(jarvisUser.id, projectId, body) });
+      }
+    }
+
+    const planMatch = pathname.match(/^\/api\/video\/projects\/([0-9a-f-]{36})\/plan$/i);
+    if (req.method === 'POST' && planMatch) {
+      const projectId = planMatch[1];
+      const project = await getVideoProjectForUser(jarvisUser.id, projectId);
+      if (!project) return json(res, 404, { error: 'Video project not found.' });
+      const [characters, scenes] = await Promise.all([
+        getVideoCharactersForUser(jarvisUser.id, projectId),
+        getVideoScenesForUser(jarvisUser.id, projectId),
+      ]);
+      const body = await parseBody(req);
+      const job = await queueVideoJobForUser(jarvisUser.id, projectId, {
+        operation: 'plan',
+        format: project.format,
+        title: project.title,
+        story_bible: project.story_bible,
+        characters,
+        scenes,
+        request: body,
+      });
+      return json(res, 202, {
+        job,
+        pipeline: ['story_director','character_bible','world_asset_bible','scene_director','storyboard_cost_gate','visual_generation','motion','voice_audio','lip_sync','editing','subtitles','continuity_brand_qa','repair_recovery','render','final_qa','publish'],
+      });
+    }
+
+    return json(res, 404, { error: 'Video Engine route not found.' });
   }
 
   if (req.method === 'GET' && pathname === '/api/plans') {
