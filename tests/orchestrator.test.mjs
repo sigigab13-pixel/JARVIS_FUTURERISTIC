@@ -62,7 +62,6 @@ test('explicit video action requires a project id instead of silently chatting',
   );
 });
 
-
 test('execution engine verifies successful tool execution', async () => {
   const orchestrator = createJarvisOrchestrator({
     userId: 'test-user',
@@ -81,4 +80,62 @@ test('execution engine verifies successful tool execution', async () => {
   assert.equal(result.success, true);
   assert.equal(result.execution.verified, true);
   assert.equal(result.execution.results[0].verification.ok, true);
+});
+
+test('autonomous planner chains memory.search into chat.generate', async () => {
+  let searchedQuery = '';
+  const orchestrator = createJarvisOrchestrator({
+    userId: 'test-user',
+    hfToken: 'test-token',
+    model: 'test-model',
+    capabilities: {
+      searchMemory: async (query) => {
+        searchedQuery = query;
+        return [{ memory_type: 'project', content: 'JARVIS uses a multi-cloud architecture.' }];
+      },
+    },
+  });
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, options) => {
+    const body = JSON.parse(options.body);
+    assert.equal(body.messages[0].content.includes('multi-cloud architecture'), true);
+    return new Response(JSON.stringify({
+      choices: [{ message: { content: 'I found the project memory.' } }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+
+  try {
+    const result = await orchestrator.run({
+      message: 'what do you remember about my JARVIS project?',
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(result.execution.verified, true);
+    assert.deepEqual(
+      result.execution.results.map(item => item.tool),
+      ['memory.search', 'chat.generate'],
+    );
+    assert.equal(searchedQuery, 'what do you remember about my JARVIS project?');
+    assert.equal(result.execution.plan.steps.length, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('planner rejects an unregistered tool before execution', async () => {
+  const orchestrator = createJarvisOrchestrator({
+    userId: 'test-user',
+    hfToken: 'test-token',
+    model: 'test-model',
+  });
+
+  await assert.rejects(
+    () => orchestrator.run({
+      message: 'hello',
+    }).then(() => {
+      throw new Error('test should not reach this branch');
+    }),
+    { message: /Planner selected an unregistered tool/ },
+  );
 });
