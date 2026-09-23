@@ -123,7 +123,7 @@ test('autonomous planner chains memory.search into chat.generate', async () => {
   }
 });
 
-test('planner rejects an unregistered tool before execution', async () => {
+test('execution engine rejects an unregistered plan tool', async () => {
   const orchestrator = createJarvisOrchestrator({
     userId: 'test-user',
     hfToken: 'test-token',
@@ -131,11 +131,7 @@ test('planner rejects an unregistered tool before execution', async () => {
   });
 
   await assert.rejects(
-    () => orchestrator.run({
-      message: 'hello',
-    }).then(() => {
-      throw new Error('test should not reach this branch');
-    }),
-    { message: /Planner selected an unregistered tool/ },
+    () => orchestrator.executePlan([{ tool: 'does.not.exist', input: {} }]),
+    /Planner selected an unregistered tool/i,
   );
 });
