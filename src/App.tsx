@@ -4,6 +4,7 @@ import EmpireDashboard from './EmpireDashboard';
 import CapabilityCenter from './CapabilityCenter';
 import './EmpireDashboard.css';
 import { api, image } from './api';
+import { supabase } from './supabase';
 import {
   Mic,
   MicOff,
@@ -40,6 +41,10 @@ const starter: Message[] = [
 ];
 
 function App() {
+  const [session, setSession] = useState<any>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authError, setAuthError] = useState('');
   const [messages, setMessages] = useState<Message[]>(() => {
     try {
       const saved = localStorage.getItem('jarvis-history');
@@ -76,6 +81,49 @@ function App() {
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const recognitionRef = useRef<any>(null);
   const passiveRecognitionRef = useRef<any>(null);
+
+  useEffect(() => {
+    let active = true;
+    const syncSession = async (currentSession: any) => {
+      if (!currentSession?.access_token) return;
+      try {
+        const response = await api.post('/api/auth/sync', { accessToken: currentSession.access_token });
+        if (!response.data?.ok) throw new Error(response.data?.error || 'Authentication sync failed.');
+      } catch (error: any) {
+        if (active) setAuthError(error?.message || 'Could not connect your JARVIS account.');
+      }
+    };
+    void supabase.auth.getSession().then(({ data, error }) => {
+      if (!active) return;
+      if (error) setAuthError(error.message);
+      setSession(data.session || null);
+      setAuthReady(true);
+      if (data.session) void syncSession(data.session);
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      if (!active) return;
+      setSession(nextSession);
+      setAuthReady(true);
+      setAuthError('');
+      if (event === 'SIGNED_IN' && nextSession) void syncSession(nextSession);
+    });
+    return () => { active = false; listener.subscription.unsubscribe(); };
+  }, []);
+
+  const signInWithGoogle = async () => {
+    setAuthBusy(true);
+    setAuthError('');
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: window.location.origin },
+    });
+    if (error) { setAuthError(error.message); setAuthBusy(false); }
+  };
+
+  const signOut = async () => {
+    await supabase.auth.signOut();
+    setSession(null);
+  };
 
   useEffect(() => {
     localStorage.setItem('jarvis-history', JSON.stringify(messages));
@@ -395,6 +443,29 @@ function App() {
     }
     startPassiveWake();
   }, [passiveWake]);
+
+  if (!authReady) {
+    return <main className="jarvis-shell"><section className="auth-screen"><div className="auth-card"><div className="orb"><Sparkles size={20} /></div><span className="eyebrow">JARVIS AUTHENTICATION</span><h1>Connecting to JARVIS...</h1><p>Preparing your secure account session.</p></div></section></main>;
+  }
+
+  if (!session) {
+    return (
+      <main className="jarvis-shell">
+        <div className="scanline" />
+        <section className="auth-screen">
+          <div className="auth-card">
+            <div className="orb"><Sparkles size={20} /></div>
+            <span className="eyebrow">JARVIS AUTHENTICATION</span>
+            <h1>Welcome to JARVIS</h1>
+            <p>Sign in with Google to create your personal JARVIS account and keep your conversations, memory and preferences connected to you.</p>
+            <button className="security-primary" onClick={() => void signInWithGoogle()} disabled={authBusy}>{authBusy ? 'Connecting...' : 'Continue with Google'}</button>
+            {authError && <div className="security-result"><AlertTriangle size={14} /> {authError}</div>}
+            <small>JARVIS uses Supabase Auth for account identity. Your Google password is never handled by JARVIS.</small>
+          </div>
+        </section>
+      </main>
+    );
+  }
 
   return (
     <main className="jarvis-shell">
