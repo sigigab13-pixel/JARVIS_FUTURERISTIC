@@ -121,8 +121,17 @@ export async function runWorker({ workerId = createWorkerId(), once = false, pol
 
     try {
       await heartbeatJob(job.id, workerId);
-      const result = await executeJob(job);
-      await finishJob(job.id, workerId, result);
+      const heartbeatMs = Math.max(15_000, Number(process.env.JARVIS_WORKER_HEARTBEAT_MS || 60_000));
+      let heartbeatTimer = setInterval(() => {
+        heartbeatJob(job.id, workerId).catch(error => logger.warn?.(`[JARVIS worker] heartbeat failed ${job.id}:`, error));
+      }, heartbeatMs);
+      try {
+        const result = await executeJob(job);
+        await finishJob(job.id, workerId, result);
+      } finally {
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+      }
       processed += 1;
       logger.info?.(`[JARVIS worker] completed ${job.id} (${job.type})`);
     } catch (error) {
