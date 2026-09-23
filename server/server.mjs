@@ -3,6 +3,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import crypto from 'node:crypto';
+import {
+  ensureJarvisUser,
+  getConversationMessages,
+  appendConversationMessages,
+  saveOAuthState,
+  getOAuthState,
+  deleteOAuthState,
+  getYouTubeConnection,
+  saveYouTubeConnection,
+} from './store.mjs';
 
 const PORT = Number(process.env.PORT || 10000);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -15,16 +25,30 @@ const YOUTUBE_CLIENT_ID = process.env.GOOGLE_YOUTUBE_CLIENT_ID || '';
 const YOUTUBE_CLIENT_SECRET = process.env.GOOGLE_YOUTUBE_CLIENT_SECRET || '';
 const PUBLIC_URL = (process.env.PUBLIC_URL || '').replace(/\/$/, '');
 
-const oauthStates = new Map();
-let youtubeConnection = null;
 
-function json(res, status, payload) {
+function json(res, status, payload, extraHeaders = {}) {
   const body = JSON.stringify(payload);
   res.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
+    ...extraHeaders,
   });
   res.end(body);
+}
+
+function readCookie(req, name) {
+  const header = String(req.headers.cookie || '');
+  const pair = header.split(';').map(part => part.trim()).find(part => part.startsWith(`${name}=`));
+  return pair ? decodeURIComponent(pair.slice(name.length + 1)) : '';
+}
+
+function getJarvisUserId(req) {
+  const value = readCookie(req, 'jarvis_user_id');
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value) ? value : '';
+}
+
+function jarvisCookie(userId) {
+  return `jarvis_user_id=${encodeURIComponent(userId)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000; Secure`;
 }
 
 function redirect(res, location) {
@@ -96,12 +120,23 @@ async function handleApi(req, res, pathname, url) {
     return json(res, 200, { audioContent: data.audioContent, mimeType: 'audio/mpeg', voice: input.voice, languageCode: input.languageCode });
   }
 
+  if (req.method === 'GET' && pathname === '/api/chat/history') {
+    const existingUserId = getJarvisUserId(req);
+    const userId = existingUserId || crypto.randomUUID();
+    await ensureJarvisUser(userId);
+    const history = await getConversationMessages(userId, 100);
+    return json(res, 200, { messages: history, persistent: true }, existingUserId ? {} : { 'Set-Cookie': jarvisCookie(userId) });
+  }
+
   if (req.method === 'POST' && pathname === '/api/chat') {
     const input = await parseBody(req);
     const messages = Array.isArray(input.messages)
       ? input.messages.filter(m => ['user', 'assistant', 'system', 'model'].includes(String(m?.role)) && String(m?.content || '').trim()).slice(-16)
       : [];
     if (!messages.length) return json(res, 400, { error: 'A message is required.' });
+    const existingUserId = getJarvisUserId(req);
+    const userId = existingUserId || crypto.randomUUID();
+    await ensureJarvisUser(userId);
     const token = process.env.HUGGINGFACE_API_TOKEN;
     if (!token) return json(res, 503, { error: 'Hugging Face AI is not configured on this deployment.' });
     const response = await fetch(HF_CHAT_URL, {
@@ -124,7 +159,16 @@ async function handleApi(req, res, pathname, url) {
     if (!response.ok) return json(res, response.status >= 400 && response.status < 500 ? 400 : 502, { error: data?.error?.message || 'Hugging Face AI request failed.' });
     const text = String(data?.choices?.[0]?.message?.content || '').trim();
     if (!text) return json(res, 502, { error: 'The AI core returned an empty response.' });
-    return json(res, 200, { text, provider: 'Hugging Face Inference Providers', model: HF_MODEL });
+    await appendConversationMessages(userId, [
+      { role: 'user', content: String(messages[messages.length - 1]?.content || '') },
+      { role: 'assistant', content: text },
+    ]);
+    return json(
+      res,
+      200,
+      { text, provider: 'Hugging Face Inference Providers', model: HF_MODEL, persistent: true },
+      existingUserId ? {} : { 'Set-Cookie': jarvisCookie(userId) },
+    );
   }
 
   if (req.method === 'GET' && pathname === '/api/youtube/status') {
@@ -146,7 +190,7 @@ async function handleApi(req, res, pathname, url) {
     }
     const state = crypto.randomUUID();
     const redirectUri = `${PUBLIC_URL}/api/youtube/callback`;
-    oauthStates.set(state, { redirectUri, createdAt: Date.now() });
+    await saveOAuthState(state, redirectUri);
     const params = new URLSearchParams({
       client_id: YOUTUBE_CLIENT_ID,
       redirect_uri: redirectUri,
@@ -164,7 +208,7 @@ async function handleApi(req, res, pathname, url) {
     const code = String(url.searchParams.get('code') || '');
     const errorMessage = String(url.searchParams.get('error') || '');
     if (errorMessage) return redirect(res, `/?youtube=error&message=${encodeURIComponent('Google authorization was not completed.')}`);
-    const pending = oauthStates.get(state);
+    const pending = await getOAuthState(state);
     if (!pending || !code || Date.now() - pending.createdAt > 10 * 60 * 1000) {
       return redirect(res, '/?youtube=error&message=Authorization%20session%20expired');
     }
@@ -188,7 +232,7 @@ async function handleApi(req, res, pathname, url) {
       const channelData = await channelResponse.json();
       const channel = channelData?.items?.[0];
       if (!channel?.id) throw new Error('No YouTube channel was returned.');
-      youtubeConnection = {
+      const youtubeConnection = {
         channelId: String(channel.id),
         channelTitle: String(channel.snippet?.title || 'YouTube Channel'),
         refreshToken: String(tokenData.refresh_token || ''),
@@ -196,7 +240,8 @@ async function handleApi(req, res, pathname, url) {
         expiresAt: Date.now() + Number(tokenData.expires_in || 3600) * 1000,
         connectedAt: new Date().toISOString(),
       };
-      oauthStates.delete(state);
+      await saveYouTubeConnection(youtubeConnection);
+      await deleteOAuthState(state);
       return redirect(res, `/?youtube=connected&message=${encodeURIComponent(`YouTube connected: ${youtubeConnection.channelTitle}.`)}`);
     } catch (error) {
       console.error('YouTube OAuth callback error:', error);
