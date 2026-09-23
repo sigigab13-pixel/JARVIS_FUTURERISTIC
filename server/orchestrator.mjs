@@ -192,6 +192,40 @@ export function createJarvisOrchestrator({
     },
   });
 
+  async function executeTool(toolName, input = {}, context = {}, options = {}) {
+    const tool = registry.get(toolName);
+    if (!tool) throw new Error(`JARVIS tool is not registered: ${toolName}`);
+    const maxAttempts = Math.min(Math.max(Number(options.retries ?? 1) + 1, 1), 3);
+    let lastResult;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      lastResult = await tool.execute(input, context);
+      if (lastResult?.success) return { ...lastResult, attempt, attempts: maxAttempts };
+      if (lastResult?.error?.retryable === false || attempt === maxAttempts) break;
+    }
+    return { ...lastResult, attempt: maxAttempts, attempts: maxAttempts };
+  }
+
+  function verifyResult(result) {
+    if (!result || typeof result !== 'object') return { ok: false, reason: 'Tool returned no structured result.' };
+    if (result.success !== true) return { ok: false, reason: result.error?.message || 'Tool execution failed.' };
+    return { ok: true };
+  }
+
+  async function executePlan(steps, context = {}) {
+    if (!Array.isArray(steps) || steps.length === 0) throw Object.assign(new Error('Execution plan must contain at least one step.'), { statusCode: 400 });
+    if (steps.length > 8) throw Object.assign(new Error('Execution plan is limited to 8 steps.'), { statusCode: 400 });
+    const results = [];
+    for (const step of steps) {
+      const toolName = String(step?.tool || '').trim();
+      if (!toolName) throw new Error('Every execution step requires a tool.');
+      const result = await executeTool(toolName, step?.input || {}, context, { retries: step?.retries ?? 1 });
+      const verification = verifyResult(result);
+      results.push({ ...result, verification });
+      if (!verification.ok && step?.continueOnError !== true) break;
+    }
+    return results;
+  }
+
   return {
     registry,
 
@@ -258,19 +292,27 @@ export function createJarvisOrchestrator({
 
       const tool = registry.get(selectedTool);
       if (!tool) throw new Error(`JARVIS tool is not registered: ${selectedTool}`);
-      const result = await tool.execute(toolInput, {
+      const results = await executePlan(plan.steps.map(step => ({
+        ...step,
+        input: selectedTool === 'chat.generate' ? { messages: normalizedMessages } : toolInput,
+        retries: 1,
+      })), {
         user: { id: userId },
         memories,
         preferences,
       });
 
+      const result = results[results.length - 1];
+      const verified = results.every(item => item.verification?.ok);
+      const responseData = result?.data;
+
       return {
-        success: result.success,
+        success: Boolean(verified && result?.success),
         requestId,
-        response: result.success && result.data?.text ? { text: result.data.text, metadata: { provider: result.data.provider, model: result.data.model } } : undefined,
-        capability: result.success && result.data && !result.data.text ? result.data : undefined,
-        execution: { plan, results: [result] },
-        error: result.error,
+        response: verified && responseData?.text ? { text: responseData.text, metadata: { provider: responseData.provider, model: responseData.model } } : undefined,
+        capability: verified && responseData && !responseData.text ? responseData : undefined,
+        execution: { plan, results, verified },
+        error: verified ? undefined : result?.error || { code: 'EXECUTION_VERIFICATION_FAILED', message: 'JARVIS could not verify the execution result.' },
       };
     },
   };
