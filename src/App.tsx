@@ -4,7 +4,7 @@ import EmpireDashboard from './EmpireDashboard';
 import CapabilityCenter from './CapabilityCenter';
 import './EmpireDashboard.css';
 import { api, image } from './api';
-import { supabase } from './supabase';
+import { supabase, supabaseConfigured } from './supabase';
 import {
   Mic,
   MicOff,
@@ -99,6 +99,13 @@ function App() {
 
   useEffect(() => {
     let active = true;
+
+    if (!supabaseConfigured || !supabase) {
+      setAuthError('Supabase Auth is not configured in this deployment.');
+      setAuthReady(true);
+      return () => { active = false; };
+    }
+
     const syncSession = async (currentSession: any) => {
       if (!currentSession?.access_token) return;
       try {
@@ -139,6 +146,11 @@ function App() {
   const signInWithGoogle = async () => {
     setAuthBusy(true);
     setAuthError('');
+    if (!supabaseConfigured || !supabase) {
+      setAuthError('Supabase Auth is not configured in this deployment.');
+      setAuthBusy(false);
+      return;
+    }
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: { redirectTo: window.location.origin },
@@ -147,7 +159,7 @@ function App() {
   };
 
   const signOut = async () => {
-    await supabase.auth.signOut();
+    if (supabase) await supabase.auth.signOut();
     setSession(null);
   };
 
