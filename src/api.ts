@@ -1,5 +1,11 @@
 async function authHeaders(extra: Record<string, string> = {}): Promise<Record<string, string>> {
-  const { supabase } = await import('./supabase');
+  const { supabase, supabaseConfigured } = await import('./supabase');
+  if (!supabaseConfigured || !supabase) {
+    return {
+      Accept: 'application/json',
+      ...extra,
+    };
+  }
   const { data } = await supabase.auth.getSession();
   return {
     Accept: 'application/json',
